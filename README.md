@@ -60,16 +60,18 @@ cannot be opened from a browser; use the local Studio or a separately hosted
 Studio for editing. Publishing it under a path such as `/studio` requires a
 specific top-level rewrite and matching Sanity base path and asset URLs.
 
-Set these shared Vercel environment variables for Preview and Production:
+The website defaults to Sanity project `6ny2t94o` and dataset `production`, so
+deployments build without additional environment configuration. To override
+these defaults, set shared Vercel environment variables for Preview and Production:
 
 ```dotenv
 NEXT_PUBLIC_SANITY_PROJECT_ID=6ny2t94o
 NEXT_PUBLIC_SANITY_DATASET=production
 ```
 
-These public identifiers must be available during the Next.js build. No read
-token is needed for published content in this public dataset. Add the actual
-deployment origin to Sanity CORS origins for browser live updates; if the Studio
+Overrides must be available during the Next.js build; redeploy after changing
+them. No read token is needed for published content in this public dataset. Add
+the actual deployment origin to Sanity CORS origins for browser live updates; if the Studio
 is made public, its origin also needs credential-enabled CORS for editor login.
 
 To test both services together from the repository root:

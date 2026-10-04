@@ -47,9 +47,12 @@ generated `sanity.types.ts` alongside schema/query changes.
 
 ## Deployment and checks
 
-Set `NEXT_PUBLIC_SANITY_PROJECT_ID=6ny2t94o` and
-`NEXT_PUBLIC_SANITY_DATASET=production` in your deployment environment. Add the
-actual frontend origin to Sanity CORS origins before enabling browser live updates.
+The app defaults to project `6ny2t94o` and dataset `production`, matching the
+standalone Studio. `NEXT_PUBLIC_SANITY_PROJECT_ID` and `NEXT_PUBLIC_SANITY_DATASET`
+can override these public defaults at build time; redeploy after changing them.
+`.env.example` documents the optional overrides, but is not loaded by Next.js.
+Add the actual frontend origin to Sanity CORS origins before enabling browser
+live updates.
 Deploy the Studio separately with its own CLI.
 
 ```sh
