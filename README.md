@@ -38,3 +38,49 @@ npm run typegen
 
 See [Studio setup](studio/README.md) and [web setup](web/README.md) for schema
 deployment, validation, environment configuration, and deployment details.
+
+## Vercel Services
+
+Import the repository as one Vercel project with its Root Directory set to the
+repository root, where `vercel.json` defines two independently built services.
+Each service uses `npm ci` and its own `npm run build` script.
+
+The deployment routes are:
+
+| Service | Directory | Public access | Calls to other services |
+| --- | --- | --- | --- |
+| `web` | `web/` | All paths (`/(.*)`) | None |
+| `studio` | `studio/` | Internal only; no public rewrite | None |
+
+Both applications connect directly to Sanity's hosted Content Lake. The Studio
+is an editing application, not the website's content API, so no Vercel service
+bindings are needed. The Next.js app stays at `/` and needs no base path change.
+The Studio remains standalone. As currently configured, its Vercel service
+cannot be opened from a browser; use the local Studio or a separately hosted
+Studio for editing. Publishing it under a path such as `/studio` requires a
+specific top-level rewrite and matching Sanity base path and asset URLs.
+
+Set these shared Vercel environment variables for Preview and Production:
+
+```dotenv
+NEXT_PUBLIC_SANITY_PROJECT_ID=6ny2t94o
+NEXT_PUBLIC_SANITY_DATASET=production
+```
+
+These public identifiers must be available during the Next.js build. No read
+token is needed for published content in this public dataset. Add the actual
+deployment origin to Sanity CORS origins for browser live updates; if the Studio
+is made public, its origin also needs credential-enabled CORS for editor login.
+
+To test both services together from the repository root:
+
+```sh
+cp .env.example .env.local
+npx --yes vercel@latest dev -L
+```
+
+`-L` runs locally without creating or linking a cloud project. Service bindings,
+if added for future backend services, are injected by Vercel in runtime functions;
+do not set their variables manually or use them during builds or in middleware.
+
+See [Vercel Services](https://vercel.com/docs/services) for the current format.

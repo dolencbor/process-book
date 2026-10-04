@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "studio": {
+      "root": "studio",
+      "framework": "sanity",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build"
+    },
+    "web": {
+      "root": "web",
+      "framework": "nextjs",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
+}
