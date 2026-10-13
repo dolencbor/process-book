@@ -10,9 +10,9 @@ const component = source.slice(start,end).replace(/\n}\);\s*$/, '\n}');
 const rowStart=source.indexOf('function TableRow(');
 const rowEnd=source.indexOf('\n// Tutorial 030:',rowStart);
 const rowComponent=source.slice(rowStart,rowEnd).replace(/\n}\);\s*$/, '\n}');
-function fixture(code, reduced=false) {
+function fixture(code, reduced=false, mobile=false) {
   const hooks=[], effects=[], periods=[];
-  let cursor=0, tree, scrollTop=0, geometry, stateDirty=false, frameId=0;const frames=new Map();
+  let cursor=0, tree, scrollTop=0, geometry, stateDirty=false, frameId=0, timerId=0;const frames=new Map(), timers=new Map();
   const flush=()=>{const jobs=[...frames.values()];frames.clear();jobs.forEach(fn=>fn());};
   const h=(type,props,...children)=>typeof type==='function'?type(props):({type,props:props||{},children:children.flat(Infinity).filter(Boolean)});
   const find=(node,cls)=>node?.props?.className===cls?node:(node?.children||[]).map(n=>find(n,cls)).find(Boolean);
@@ -27,8 +27,9 @@ function fixture(code, reduced=false) {
     document:{elementFromPoint:(x,y)=>({closest:()=>rows[Math.max(0,Math.min(83,Math.floor((y-281+scrollTop)/54.5)))]})},
     React:{createElement:h}, Link:'a', motion:new Proxy({},{get:(_,tag)=>'motion.'+tag}),
     AnimatePresence:'presence',TablePeriodHeading:'heading',WeekNumber:'number',PreviewImage:'image',
-    useIsPresent:()=>true,useReducedMotion:()=>reduced,useMobileLayout:()=>false,
+    useIsPresent:()=>true,useReducedMotion:()=>reduced,useMobileLayout:()=>mobile,
     requestAnimationFrame:fn=>{frames.set(++frameId,fn);return frameId;},cancelAnimationFrame:id=>frames.delete(id),
+    setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),
     ResizeObserver:class{observe(){}disconnect(){}},
     useCallback:(fn,deps)=>{const state=hook(()=>({fn,deps}));if(deps.some((v,i)=>v!==state.deps[i])){state.fn=fn;state.deps=deps;}return state.fn;},
     useRef:v=>hook(()=>({current:v})),
@@ -39,6 +40,7 @@ function fixture(code, reduced=false) {
     styles:new Proxy({},{get:(_,key)=>key}),
     weeks:Array.from({length:28},(_,i)=>({number:String(i+1).padStart(2,'0'),title:'Week title'})),
     periodForWeek:w=>Math.floor(w/7),screenReveal:()=>({}),revealStep:.12,maskedText:{},interfaceTransition:{},
+    mobileRowHighlightTransition:{type:'tween',duration:.16},mobileRowPreviewTransition:{type:'tween',duration:.24},
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
@@ -64,6 +66,8 @@ function fixture(code, reduced=false) {
   return {
     get preview(){return hooks[9].value;},
     get movingImage(){return find(tree,'rowPreviewImage');},
+    get imageContainer(){return find(tree,'rowPreviewReveal').children[0].type;},
+    get highlightOpacity(){return find(tree,'mobileTopRowHighlight').props.animate.opacity;},
     get category(){return props.category;},get max(){return viewport.scrollHeight-viewport.clientHeight;},
     get y(){return find(tree,'rowPreview').props.style.y.get();},get previewInside(){return geometry.inside;},
     hover(index,y){const visit=n=>{if(n.props?.role==='rowgroup')n.props.onPointerMove({pointerType:'mouse',clientX:950,clientY:y,target:{closest:()=>rows[index]}});else(n.children||[]).forEach(visit);};visit(tree);flush();if(stateDirty)render();},
@@ -73,6 +77,12 @@ function fixture(code, reduced=false) {
     periods,
   };
 }
+const mobile=fixture(component,false,true);
+mobile.scroll(3052+5);
+assert.equal(mobile.imageContainer,'motion.div','mobile mounts one preview image instead of retaining outgoing images');
+assert.equal(mobile.movingImage.props.transition.duration,.24,'mobile uses the hover image path with a faster Motion transition');
+assert.equal(mobile.highlightOpacity,.5,'the top-row selection stays visible while scrolling');
+assert.equal(mobile.preview.week,0,'the preview tracks the top row before scroll settles');
 for(const reduced of [false,true]){
  const current=fixture(component,reduced);
  assert.equal(current.previewInside,false,'preview must be a sibling of scroller');

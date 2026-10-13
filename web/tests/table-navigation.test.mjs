@@ -143,11 +143,19 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.preview.week,7); assert.equal(mobile.category,1);
   mobile.manual(mobile.at(14).offsetTop-1,false);
   assert.equal(mobile.snapped,false,'the gray highlight disappears between snap points');
-  assert.equal(mobile.preview.week,7,'fast scrolling does not start an image transition for every crossed row');
+  assert.equal(mobile.preview.week,13,'the top visible row changes the preview before scrolling rests');
+  assert.equal(mobile.highlightHeight,'1px','the selection covers only the remaining visible part of the top row');
   assert.equal(mobile.visibleWeeks.at(-1),13,'switching views uses the top visible week');
   mobile.manual(mobile.at(14).offsetTop,false);
   assert.equal(mobile.snapped,false,'passing exactly through a row start cannot flash the gray highlight');
+  assert.equal(mobile.preview.week,14);
   assert.equal(mobile.visibleWeeks.at(-1),14);
+  mobile.manual(mobile.at(14).offsetTop-1,false);
+  assert.equal(mobile.preview.week,13,'upward scrolling selects the top row immediately');
+  assert.equal(mobile.preview.direction,-1,'upward selection animates in the reverse direction');
+  mobile.manual(mobile.at(14).offsetTop,false);
+  assert.equal(mobile.preview.week,14,'downward scrolling selects the top row immediately');
+  assert.equal(mobile.preview.direction,1,'downward selection animates in the forward direction');
   mobile.hold(true);
   mobile.settle();
   assert.equal(mobile.snapped,false,'List never snaps under a finger held on the rows');
@@ -198,7 +206,7 @@ const highlightWrites=mobileWorkload.highlightWrites;
 const mobileBurst=mobileWorkload.burst(1000,mobileWorkload.at(14).offsetTop);
 assert.equal(mobileBurst.queued,1,'mobile scroll and touch-adjacent events share one frame');
 assert.equal(mobileWorkload.highlightWrites,highlightWrites,'stationary mobile rows do not repaint the fixed highlight during rapid scroll events');
-console.log('PASS: mobile week selection follows free scrolling while the preview waits for rest; proximity alignment highlights only settled rows, and tab travel remains stable.');
+console.log('PASS: mobile top-row highlight and preview select immediately in both scroll directions, cover only the visible row, and settle without interrupting tab travel.');
 
 // Boundary crossings preserve sub-row position, update the correct period,
 // and recycle a fixed-size DOM rather than adding rows each lap.

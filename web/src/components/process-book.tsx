@@ -17,6 +17,8 @@ import type { ProcessBookContent } from "@/sanity/lib/process-book";
 const MotionLink = motion.create(Link);
 
 const interfaceTransition = { type: "tween", duration: 0.68, ease: [0.22, 1, 0.36, 1] } satisfies Transition;
+const mobileRowHighlightTransition = { ...interfaceTransition, duration: 0.16 } satisfies Transition;
+const mobileRowPreviewTransition = { ...interfaceTransition, duration: 0.24 } satisfies Transition;
 // Tab controls always use finite tweens: no inherited spring or momentum.
 const tabResizeTransition = { ...interfaceTransition, type: "tween" } satisfies Transition;
 const instantTabTransition = { type: "tween", duration: 0 } satisfies Transition;
@@ -317,9 +319,13 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const sizeMobileHighlight = useCallback((entry: number) => {
     if (!mobile) return;
     const row = rowGeometry.current.rows[entry];
-    const canvas = viewport.current?.parentElement;
-    if (!row || !canvas) return;
-    const height = `${row.offsetHeight}px`;
+    const scroll = viewport.current;
+    const canvas = scroll?.parentElement;
+    if (!row || !scroll || !canvas) return;
+    // The fixed selection covers only the part of the top row still visible.
+    // It shrinks on a downward swipe and expands on an upward swipe.
+    const visibleHeight = Math.max(0, Math.min(row.offsetHeight, row.offsetTop + row.offsetHeight - scroll.scrollTop));
+    const height = `${visibleHeight}px`;
     if (canvas.style.getPropertyValue("--mobile-top-row-height") !== height)
       canvas.style.setProperty("--mobile-top-row-height", height);
   }, [mobile]);
@@ -389,10 +395,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const aligned = Math.abs(scroll.scrollTop - rows[index].offsetTop) <= 1;
     if (mobile) {
       setMobileSnapped(settled && aligned);
-      if (settled && aligned) sizeMobileHighlight(index);
-      // A fast flick can cross many rows before the 680ms image transition
-      // ends. Let the week and period labels track live; swap one preview at rest.
-      if (settled && (previewEntry.current !== index || !visible.current)) show(index);
+      sizeMobileHighlight(index);
+      // The single mobile image retargets with the selected top row. Its short
+      // Motion entrance never leaves a queue of old images after a fast flick.
+      if (previewEntry.current !== index || !visible.current) show(index);
     }
     if (indicated.current.week !== week) { indicated.current.week = week; onWeekChange(week); }
     if (indicated.current.period !== period) { indicated.current.period = period; onPeriodChange(period); }
@@ -621,9 +627,9 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       <div className={styles.tableHeading} aria-hidden><span>Week</span><span>Title</span></div>
     </motion.div>
     <motion.div className={styles.mobileTopRowHighlight} aria-hidden initial={false}
-      animate={{ opacity: mobileSnapped ? 1 : 0 }}
-      transition={reducedMotion ? { duration: 0 } : { type: "tween", duration: mobileSnapped ? 0.2 : 0.08, ease: [0.22, 1, 0.36, 1] }} />
-    <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onWheel={interruptTravel}
+      animate={{ opacity: preview.visible ? mobileSnapped ? 1 : 0.5 : 0 }}
+      transition={reducedMotion ? { duration: 0 } : mobileRowHighlightTransition} />
+    <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onScrollEnd={settleMobileList} onWheel={interruptTravel}
       onTouchStart={() => { listTouching.current = true; interruptTravel(); }}
       onTouchEnd={() => { listTouching.current = false; if (mobile) { if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current); mobileSettleTimer.current = setTimeout(settleMobileList, 120); } }}
       onTouchCancel={() => { listTouching.current = false; if (mobile) settleMobileList(); }}
@@ -658,7 +664,13 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
           style={reducedMotion ? { opacity: preview.visible && active ? 1 : 0, clipPath: "inset(0%)" } : undefined}
           animate={reducedMotion ? undefined : { opacity: preview.visible && active ? 1 : 0, clipPath: preview.visible && active ? "inset(0% 0% 0% 0%)" : "inset(50% 0% 50% 0%)" }}
           transition={interfaceTransition}>
-          <AnimatePresence initial={false} custom={preview.direction}>
+          {mobile ? <motion.div key={preview.week} className={styles.rowPreviewImage} data-smooth-corners="0.6" custom={preview.direction}
+            style={reducedMotion ? { y: 0 } : undefined}
+            variants={maskedText} initial={reducedMotion || !preview.visible ? false : "enter"}
+            animate={reducedMotion ? undefined : "visible"}
+            transition={mobileRowPreviewTransition}>
+            <PreviewImage week={preview.week} />
+          </motion.div> : <AnimatePresence initial={false} custom={preview.direction}>
             <motion.div key={preview.week} className={styles.rowPreviewImage} data-smooth-corners="0.6" custom={preview.direction}
               style={reducedMotion ? { y: 0 } : undefined}
               variants={maskedText} initial={reducedMotion ? false : "enter"}
@@ -666,7 +678,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
               transition={interfaceTransition}>
               <PreviewImage week={preview.week} />
             </motion.div>
-          </AnimatePresence>
+          </AnimatePresence>}
         </motion.div>
       </div>
     </motion.div>
