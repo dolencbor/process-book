@@ -90,6 +90,17 @@ const ViewSwitcher = memo(function ViewSwitcher({ view, onViewChange, startVisib
 const railSpring = { type: "spring", stiffness: 620, damping: 40, mass: 0.7, restDelta: 0.001, restSpeed: 0.01 } satisfies Transition;
 const railSnapSpring = { ...railSpring, stiffness: 300, damping: 32, mass: 0.85 } satisfies Transition;
 const railSwipeVelocityLimit = 0.75 * Math.sqrt(railSnapSpring.stiffness / railSnapSpring.mass);
+const railMomentumPower = 0.18;
+const railMomentumTransition = { type: "inertia", power: railMomentumPower, timeConstant: 160, restDelta: 0.005 } satisfies Transition;
+
+// A soft limit keeps the card train tactile without selecting another week mid-drag.
+const resistedRailOffset = (fingerY: number, step: number) => Math.tanh(-fingerY / step * 0.75) * 0.42;
+const projectedRailTarget = (base: number, projected: number, direction: number, count: number) => {
+  const maxSteps = Math.min(3, count - 1);
+  if (maxSteps <= 0) return base;
+  const steps = Math.min(maxSteps, Math.max(1, Math.round(Math.max(0, (projected - base) * direction))));
+  return base + direction * steps;
+};
 
 const categories = [
   { name: "Foundation", icon: "foundation", color: "#000000", ink: "#f6f6f6", tabWidth: 113, labelWidth: 63, iconGap: 10 },
@@ -783,7 +794,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
   const cycleOrigin = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touching = useRef(false);
-  const touchStart = useRef<{ x: number; y: number; time: number; samples: { y: number; time: number }[] } | null>(null);
+  const touchStart = useRef<{ x: number; y: number; time: number; base: number; anchor: number; axis?: "x" | "y"; samples: { y: number; time: number }[] } | null>(null);
   const suppressTouchClickUntil = useRef(0);
   const wasActive = useRef(false);
   const handledJump = useRef(-1);
@@ -838,6 +849,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     if (!active) {
       wasActive.current = false;
       touching.current = false;
+      touchStart.current = null;
       if (settleTimer.current) clearTimeout(settleTimer.current);
       travelling.current = false;
       position.stop();
@@ -849,6 +861,8 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     wasActive.current = true;
     handledJump.current = jumpVersion;
     if (settleTimer.current) clearTimeout(settleTimer.current);
+    touchStart.current = null;
+    touching.current = false;
     position.stop();
     travelling.current = false;
     if (firstPlacement) {
@@ -971,7 +985,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     onPeriodChange(periodForWeek(wrapWeek(Math.round(current), weeks.length)));
   };
 
-  const goTo = (value: number, absolute = false, gestureVelocity?: number) => {
+  const goTo = (value: number, absolute = false, gestureVelocity?: number, momentum = false) => {
     const element = viewport.current;
     if (!element) return;
     interruptTravel();
@@ -980,7 +994,14 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     const target = absolute ? Math.floor(current / weeks.length) * weeks.length + value : current + value;
     element.focus({ preventScroll: true });
     inputPosition.set(target);
-    movePosition(target, true, gestureVelocity);
+    if (momentum && !reducedMotion && gestureVelocity !== undefined) {
+      const direction = Math.sign(value);
+      animate(position, target, {
+        ...railMomentumTransition,
+        velocity: gestureVelocity,
+        modifyTarget: projected => projectedRailTarget(current, projected, direction, weeks.length),
+      });
+    } else movePosition(target, true, gestureVelocity);
     element.scrollTo({ top: (target - cycleOrigin.current) * scrollStep.current, behavior: "instant" });
     rebase();
   };
@@ -989,10 +1010,21 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     interruptTravel();
     touching.current = true;
     if (settleTimer.current) clearTimeout(settleTimer.current);
+    if (mobile && event.touches.length !== 1) {
+      const interrupted = touchStart.current;
+      touchStart.current = null;
+      if (interrupted && Math.abs(position.get() - interrupted.base) > 0.0001) movePosition(interrupted.base, true, 0);
+      return;
+    }
     if (mobile && event.touches.length === 1) {
       const touch = event.touches[0];
       const time = Date.now();
-      touchStart.current = { x: touch.clientX, y: touch.clientY, time, samples: [{ y: touch.clientY, time }] };
+      position.stop();
+      const anchor = position.get();
+      const base = Math.round(anchor);
+      inputPosition.set(base);
+      viewport.current?.scrollTo({ top: (base - cycleOrigin.current) * scrollStep.current, behavior: "instant" });
+      touchStart.current = { x: touch.clientX, y: touch.clientY, time, base, anchor, samples: [{ y: touch.clientY, time }] };
     } else touchStart.current = null;
   };
 
@@ -1003,11 +1035,18 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     start.samples.push({ y: event.touches[0].clientY, time });
     // Keep the sample just before the last 100ms as well as recent samples.
     while (start.samples.length > 2 && start.samples[1].time < time - 100) start.samples.shift();
+    const x = event.touches[0].clientX - start.x;
+    const y = event.touches[0].clientY - start.y;
+    if (!start.axis && Math.max(Math.abs(x), Math.abs(y)) > 6) start.axis = Math.abs(y) > Math.abs(x) ? "y" : "x";
+    if (start.axis !== "y" || reducedMotion) return;
+    const next = start.anchor + resistedRailOffset(y, scrollStep.current);
+    position.set(Math.max(start.base - 0.45, Math.min(start.base + 0.45, next)));
   };
 
   const endTouch = (event: TouchEvent<HTMLDivElement>) => {
-    touching.current = false;
+    touching.current = (event.touches?.length ?? 0) > 0;
     if (mobile) {
+      if (touching.current) { touchStart.current = null; return; }
       const start = touchStart.current;
       touchStart.current = null;
       const touch = event.changedTouches[0];
@@ -1016,16 +1055,23 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       const y = touch.clientY - start.y;
       const time = Date.now();
       const speed = Math.abs(y) / Math.max(1, time - start.time);
-      if (Math.abs(y) > Math.abs(x) && (Math.abs(y) >= 28 || (Math.abs(y) >= 12 && speed >= 0.35))) {
+      if (start.axis !== "x" && Math.abs(y) > Math.abs(x) && (Math.abs(y) >= 28 || (Math.abs(y) >= 12 && speed >= 0.35))) {
+        if (start.axis === "y" && !reducedMotion) {
+          const next = start.anchor + resistedRailOffset(y, scrollStep.current);
+          position.set(Math.max(start.base - 0.45, Math.min(start.base + 0.45, next)));
+        }
         const recent = start.samples.find(sample => sample.time >= time - 100) ?? start.samples.at(-1)!;
         const recentY = touch.clientY - recent.y;
         const direction = y < 0 ? 1 : -1;
-        // Translate release speed from px/ms to weeks/s. The rail does not
-        // follow the finger; this velocity affects only the post-release snap.
+        // Translate release speed from px/ms to weeks/s, then project Motion's
+        // inertia onto one to three whole weeks in the swipe direction.
         const releaseVelocity = direction * Math.min(railSwipeVelocityLimit,
           Math.max(0, -recentY * direction) / Math.max(1, time - recent.time) * 1000 / scrollStep.current * 1.6);
+        const target = projectedRailTarget(start.base, position.get() + releaseVelocity * railMomentumPower, direction, weeks.length);
         suppressTouchClickUntil.current = Date.now() + 400;
-        goTo(direction, false, releaseVelocity);
+        goTo(target - start.base, false, releaseVelocity, Math.abs(target - start.base) > 1);
+      } else if (Math.abs(position.get() - start.base) > 0.0001) {
+        goTo(0, false, 0);
       }
       return;
     }
@@ -1034,7 +1080,9 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
 
   const cancelTouch = () => {
     touching.current = false;
+    const start = touchStart.current;
     touchStart.current = null;
+    if (mobile && start && Math.abs(position.get() - start.base) > 0.0001) goTo(0, false, 0);
     if (!mobile) settleTimer.current = setTimeout(settle, 80);
   };
 

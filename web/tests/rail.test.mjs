@@ -2,7 +2,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 import ts from "typescript";
-import { motionValue, keyframes, spring } from "motion";
+import { motionValue, keyframes, spring, inertia } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekScrollView(');
 const end = source.indexOf('  return <div ref={viewport}', start);
@@ -43,7 +43,9 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
       animation = { value, target, options, stopped: false, time: 0,
         generator: options.type === 'spring'
           ? spring({ keyframes: [value.get(), target], ...options })
-          : keyframes({ keyframes: [value.get(), target], duration: options.duration * 1000, ease: options.ease }) };
+          : options.type === 'inertia'
+            ? inertia({ keyframes: [value.get(), target], ...options })
+            : keyframes({ keyframes: [value.get(), target], duration: options.duration * 1000, ease: options.ease }) };
     },
     weeks: Array.from({length: 28}),
     wrapWeek: n => ((n % 28) + 28) % 28,
@@ -126,6 +128,7 @@ mobileTap.handlers().endTouch({changedTouches:[{clientX:200,clientY:497}]});
 assert.equal(mobileTap.commands,0,'a tap leaves the selected week in place');
 assert.equal(mobileTap.element.scrollTop,tapStart);
 mobileTap.handlers().beginTouch({touches:[{clientX:200,clientY:500}]});
+mobileTap.tick(300);
 mobileTap.handlers().endTouch({changedTouches:[{clientX:201,clientY:440}]});
 assert.equal(mobileTap.commands,1,'one upward swipe starts one week transition after release');
 assert.equal(mobileTap.animation.target,34);
@@ -136,6 +139,7 @@ mobileTap.handlers().captureTouchClick({preventDefault(){prevented=true;},stopPr
 assert(prevented&&stopped,'a swipe cannot accidentally open a week link');
 const mobileReverse=createRail(0,false,true);
 mobileReverse.handlers().beginTouch({touches:[{clientX:200,clientY:400}]});
+mobileReverse.tick(300);
 mobileReverse.handlers().endTouch({changedTouches:[{clientX:200,clientY:460}]});
 assert.equal(mobileReverse.animation.target,27,'swiping down from Week 01 wraps to Week 28');
 assert(mobileReverse.animation.options.velocity < 0, 'reverse swipes carry velocity toward the previous card');
@@ -145,7 +149,8 @@ function swipeWithDuration(duration) {
   rail.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
   rail.tick(duration * 0.6);
   rail.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 460 }] });
-  assert.equal(rail.handlers().position.get(), 33, 'touchmove never drags a card');
+  assert(rail.handlers().position.get() > 33 && rail.handlers().position.get() < 33.2,
+    'a touchmove follows the finger with strong resistance');
   rail.tick(duration * 0.4);
   rail.handlers().endTouch({ changedTouches: [{ clientX: 200, clientY: 440 }] });
   return rail;
@@ -171,4 +176,87 @@ for (const rail of [slowSwipe, fastSwipe, mobileReverse]) {
     if (sample.done) break;
   }
 }
-console.log('PASS: locked destination, separate indicator callbacks, resize continuity, and actual Motion keyframes at 60fps visit every intervening week forward/reverse, land exactly, survive intermediate renders, retarget continuously, allow manual takeover, and respect reduced motion. Mobile flick velocity accelerates a one-card, no-drag snap without overshoot.');
+
+const resisted = createRail(5, false, true);
+resisted.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
+resisted.tick(40);
+resisted.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 320 }] });
+assert(resisted.handlers().position.get() > 33.2 && resisted.handlers().position.get() < 33.45,
+  'even a full card of finger travel reveals less than half a week');
+resisted.tick(40);
+resisted.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 80 }] });
+assert(resisted.handlers().position.get() <= 33.45, 'drag preview never selects the next week');
+assert.deepEqual(resisted.seen, [], 'text and period indicators stay on the current week during drag');
+resisted.handlers().cancelTouch();
+assert.equal(resisted.animation.target, 33, 'a cancelled gesture springs back to the original week');
+
+const horizontal = createRail(5, false, true);
+horizontal.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
+horizontal.tick(60);
+horizontal.handlers().moveTouch({ touches: [{ clientX: 260, clientY: 490 }] });
+horizontal.handlers().endTouch({ changedTouches: [{ clientX: 270, clientY: 480 }] });
+assert.equal(horizontal.handlers().position.get(), 33);
+assert.equal(horizontal.commands, 0, 'horizontal touch gestures never scroll the card stack');
+
+function strongFlick(week, direction) {
+  const rail = createRail(week, false, true);
+  const startY = direction > 0 ? 500 : 200;
+  rail.handlers().beginTouch({ touches: [{ clientX: 200, clientY: startY }] });
+  rail.tick(40);
+  rail.handlers().moveTouch({ touches: [{ clientX: 200, clientY: startY - direction * 140 }] });
+  rail.tick(30);
+  rail.handlers().endTouch({ changedTouches: [{ clientX: 200, clientY: startY - direction * 260 }] });
+  return rail;
+}
+for (const [week, direction, expected] of [[26, 1, [27, 0, 1]], [0, -1, [27, 26, 25]]]) {
+  const rail = strongFlick(week, direction);
+  const base = 28 + week;
+  assert.equal(rail.animation.options.type, 'inertia', 'strong flicks use Motion inertia');
+  assert.equal(rail.animation.target, base + direction * 3, 'momentum is capped at three weeks');
+  assert.equal(rail.animation.options.modifyTarget(rail.animation.value.get() + rail.animation.options.velocity * rail.animation.options.power),
+    rail.animation.target, 'Motion quantizes the projected inertia target to the same selected week');
+  assert.equal(rail.element.scrollTop, rail.animation.target * 180, 'native scroll and the visual destination agree');
+  rail.advance(2000);
+  assert.deepEqual(rail.seen, expected, 'all intervening weeks remain visible across the loop seam');
+  assert.equal(rail.animation.value.get(), rail.animation.target, 'inertia lands exactly on its snapped week');
+}
+
+const mediumFlick = createRail(5, false, true);
+mediumFlick.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
+mediumFlick.tick(50);
+mediumFlick.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 450 }] });
+mediumFlick.tick(50);
+mediumFlick.handlers().endTouch({ changedTouches: [{ clientX: 200, clientY: 400 }] });
+assert.equal(mediumFlick.animation.target, 35, 'a medium flick crosses two weeks');
+assert.equal(mediumFlick.animation.options.type, 'inertia');
+
+const midFlight = strongFlick(5, 1);
+midFlight.advance(180);
+const interruptedMomentum = midFlight.animation;
+const beforeTouch = interruptedMomentum.value.get();
+midFlight.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 450 }] });
+assert(interruptedMomentum.stopped, 'a new finger gesture takes over inertia');
+assert.equal(midFlight.handlers().position.get(), beforeTouch, 'taking over an in-flight flick does not jump the cards');
+
+const pinch = createRail(5, false, true);
+pinch.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
+pinch.tick(50);
+pinch.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 350 }] });
+assert(pinch.handlers().position.get() > 33);
+pinch.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 350 }, { clientX: 240, clientY: 350 }] });
+assert.equal(pinch.animation.target, 33, 'adding a second finger cancels the card drag');
+pinch.handlers().endTouch({ touches: [{ clientX: 200, clientY: 350 }], changedTouches: [{ clientX: 240, clientY: 350 }] });
+pinch.handlers().endTouch({ touches: [], changedTouches: [{ clientX: 200, clientY: 350 }] });
+assert.equal(pinch.animation.target, 33, 'pinch release cannot trigger a week change');
+
+const reducedDrag = createRail(5, true, true);
+reducedDrag.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
+reducedDrag.tick(40);
+reducedDrag.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 350 }] });
+assert.equal(reducedDrag.handlers().position.get(), 33, 'reduced motion disables the drag preview');
+reducedDrag.tick(30);
+reducedDrag.handlers().endTouch({ changedTouches: [{ clientX: 200, clientY: 240 }] });
+assert.equal(reducedDrag.commands, 0, 'reduced motion jumps directly to the selected week');
+assert.equal(reducedDrag.handlers().position.get(), 36, 'reduced motion still selects the flick destination');
+
+console.log('PASS: tab travel, loops, resizing and reduced motion remain intact. Mobile cards resist finger drag, cancel cleanly, and use bounded Motion inertia to snap strong flicks through every intervening week.');
