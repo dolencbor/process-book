@@ -1,7 +1,7 @@
 "use client";
 
 import { animate, AnimatePresence, motion, MotionConfig, useIsPresent, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, useTransform, type HTMLMotionProps, type MotionValue, type Transition } from "motion/react";
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode, type TouchEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { preload } from "react-dom";
@@ -297,6 +297,9 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const pendingPointer = useRef<{ scrolled: boolean; index?: number }>({ scrolled: false });
   const mobile = useMobileLayout();
   const [copies, setCopies] = useState(3);
+  const [mobileSnapped, setMobileSnapped] = useState(() => initialListLocation ? initialListLocation.offset < 0.001 : false);
+  const mobileSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listTouching = useRef(false);
   const previewEntry = useRef(weeks.length + jumpWeek);
   const recyclingFocus = useRef(false);
   const sizeMobileHighlight = useCallback((entry: number) => {
@@ -333,7 +336,11 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     observer.observe(scroll); observer.observe(element);
     return () => observer.disconnect();
   }, [copies, mobile, sizeMobileHighlight, weeks.length]);
-  useEffect(() => () => { cancelAnimationFrame(pointerFrame.current); pointerFrame.current = 0; }, [active]);
+  useEffect(() => () => {
+    cancelAnimationFrame(pointerFrame.current);
+    pointerFrame.current = 0;
+    if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+  }, [active]);
 
   const recycle = useCallback(() => {
     const scroll = viewport.current;
@@ -360,18 +367,22 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     }
   }, [weeks.length]);
 
-  const indicatePeriod = () => {
+  const indicatePeriod = (settled = false) => {
     const scroll = viewport.current;
     const { rows, ends } = rowGeometry.current;
     if (!active || travelling.current || !scroll || !rows.length) return;
     const index = Math.max(0, ends.findIndex(end => end > scroll.scrollTop + 0.5));
     const week = Number(rows[index].dataset.tableWeek);
     const period = periodForWeek(week);
+    const aligned = Math.abs(scroll.scrollTop - rows[index].offsetTop) <= 1;
     if (mobile) {
-      if (indicated.current.week !== week) sizeMobileHighlight(index);
-      if (previewEntry.current !== index || !visible.current) show(index);
+      setMobileSnapped(settled && aligned);
+      if (settled && aligned) {
+        sizeMobileHighlight(index);
+        if (previewEntry.current !== index || !visible.current) show(index);
+      }
     }
-    if (indicated.current.week !== week) { indicated.current.week = week; onWeekChange(week); }
+    if ((!mobile || settled && aligned) && indicated.current.week !== week) { indicated.current.week = week; onWeekChange(week); }
     if (indicated.current.period !== period) { indicated.current.period = period; onPeriodChange(period); }
   };
 
@@ -429,6 +440,21 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     });
   }, [active, mobile, reducedMotion, targetY, y, weeks.length]);
 
+  const settleMobileList = () => {
+    if (!mobile || !active || travelling.current || listTouching.current) return;
+    const scroll = viewport.current;
+    const { rows, ends, ready } = rowGeometry.current;
+    if (!scroll || !ready || !rows.length) return;
+    if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+    mobileSettleTimer.current = null;
+    const first = Math.max(0, ends.findIndex(end => end > scroll.scrollTop + 0.5));
+    const next = Math.min(first + 1, rows.length - 1);
+    const entry = Math.abs(scroll.scrollTop - rows[next].offsetTop) < Math.abs(scroll.scrollTop - rows[first].offsetTop) ? next : first;
+    if (Math.abs(scroll.scrollTop - rows[entry].offsetTop) > 0.5) scroll.scrollTop = rows[entry].offsetTop;
+    recycle();
+    indicatePeriod(true);
+  };
+
   const goToWeek = useCallback((index: number, immediate = false, entry?: number) => {
     const scroll = viewport.current;
     const { rows, cycleHeight, ready } = rowGeometry.current;
@@ -440,6 +466,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     navigation.current?.stop();
     navigation.current = null;
     travelling.current = false;
+    if (mobile) {
+      if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+      setMobileSnapped(false);
+    }
     // Native snapping is suspended during Motion travel so Safari cannot snap
     // individual writes to another row. Restore it at the exact destination.
     scroll.dataset.travelling = "true";
@@ -455,7 +485,11 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       delete scroll.dataset.travelling;
       indicated.current.week = index;
       onWeekChange(index);
-      if (mobile) { sizeMobileHighlight(weeks.length + index); show(weeks.length + index); }
+      if (mobile) {
+        sizeMobileHighlight(weeks.length + index);
+        show(weeks.length + index);
+        setMobileSnapped(true);
+      }
     };
     if (immediate || reducedMotion || Math.abs(target - scroll.scrollTop) < 0.001) {
       write(target); finish(); return;
@@ -503,7 +537,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         writtenTop.current = viewport.current.scrollTop;
         indicated.current.week = initialListLocation.week;
         indicated.current.period = periodForWeek(initialListLocation.week);
-        if (mobile) { sizeMobileHighlight(weeks.length + initialListLocation.week); show(weeks.length + initialListLocation.week); }
+        if (mobile) {
+          sizeMobileHighlight(weeks.length + initialListLocation.week);
+          show(weeks.length + initialListLocation.week);
+        }
         return;
       }
     }
@@ -543,6 +580,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         writtenTop.current = null;
         if (!travelling.current) recycle();
         indicatePeriod();
+        if (mobile && !travelling.current) {
+          if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+          mobileSettleTimer.current = setTimeout(settleMobileList, 120);
+        }
       }
       if (!scrolled && index !== undefined && pointer.current) show(index, pointer.current.y);
       else trackPointer();
@@ -570,12 +611,17 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       <TablePeriodHeading period={category} reducedMotion={reducedMotion} />
       <div className={styles.tableHeading} aria-hidden><span>Week</span><span>Title</span></div>
     </motion.div>
-    <div className={styles.mobileTopRowHighlight} aria-hidden />
-    <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onWheel={interruptTravel} onTouchStart={interruptTravel}
+    <motion.div className={styles.mobileTopRowHighlight} aria-hidden initial={false}
+      animate={{ opacity: mobileSnapped ? 1 : 0 }}
+      transition={reducedMotion ? { duration: 0 } : { type: "tween", duration: mobileSnapped ? 0.2 : 0.08, ease: [0.22, 1, 0.36, 1] }} />
+    <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onWheel={interruptTravel}
+      onTouchStart={() => { listTouching.current = true; interruptTravel(); }}
+      onTouchEnd={() => { listTouching.current = false; if (mobile) { if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current); mobileSettleTimer.current = setTimeout(settleMobileList, 120); } }}
+      onTouchCancel={() => { listTouching.current = false; if (mobile) settleMobileList(); }}
       onKeyDownCapture={event => {
         if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) interruptTravel();
       }}>
-    <motion.div className={styles.tableContent} variants={screenReveal(reducedMotion, 32, revealStep)}>
+    <motion.div className={styles.tableContent} variants={screenReveal(reducedMotion, mobile ? 0 : 32, revealStep)}>
       <div ref={table} className={styles.weekTable}>
         <div role="table" aria-label="All school weeks">
           <div role="row" className={styles.srOnly}><span role="columnheader">Week</span><span role="columnheader">Title</span></div>
@@ -736,6 +782,8 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
   const cycleOrigin = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touching = useRef(false);
+  const touchStart = useRef<{ x: number; y: number; time: number } | null>(null);
+  const suppressTouchClickUntil = useRef(0);
   const wasActive = useRef(false);
   const handledJump = useRef(-1);
   const travelling = useRef(false);
@@ -935,18 +983,57 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     rebase();
   };
 
+  const beginTouch = (event: TouchEvent<HTMLDivElement>) => {
+    interruptTravel();
+    touching.current = true;
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    if (mobile && event.touches.length === 1) {
+      const touch = event.touches[0];
+      touchStart.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    } else touchStart.current = null;
+  };
+
+  const endTouch = (event: TouchEvent<HTMLDivElement>) => {
+    touching.current = false;
+    if (mobile) {
+      const start = touchStart.current;
+      touchStart.current = null;
+      const touch = event.changedTouches[0];
+      if (!start || !touch) return;
+      const x = touch.clientX - start.x;
+      const y = touch.clientY - start.y;
+      const speed = Math.abs(y) / Math.max(1, Date.now() - start.time);
+      if (Math.abs(y) > Math.abs(x) && (Math.abs(y) >= 28 || (Math.abs(y) >= 12 && speed >= 0.35))) {
+        suppressTouchClickUntil.current = Date.now() + 400;
+        goTo(y < 0 ? 1 : -1);
+      }
+      return;
+    }
+    settleTimer.current = setTimeout(settle, 80);
+  };
+
+  const cancelTouch = () => {
+    touching.current = false;
+    touchStart.current = null;
+    if (!mobile) settleTimer.current = setTimeout(settle, 80);
+  };
+
+  const captureTouchClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (mobile && Date.now() < suppressTouchClickUntil.current) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
   return <div ref={viewport} className={styles.scrollViewport} tabIndex={0}
     aria-label="Weekly card stack. Scroll, swipe, or use arrow keys to change week."
     aria-description="The last week loops to the first, and the first loops to the last."
     onScroll={scroll}
     onWheel={interruptTravel}
-    onTouchStart={() => {
-      interruptTravel();
-      touching.current = true;
-      if (settleTimer.current) clearTimeout(settleTimer.current);
-    }}
-    onTouchEnd={() => { touching.current = false; settleTimer.current = setTimeout(settle, 80); }}
-    onTouchCancel={() => { touching.current = false; settleTimer.current = setTimeout(settle, 80); }}
+    onClickCapture={captureTouchClick}
+    onTouchStart={beginTouch}
+    onTouchEnd={endTouch}
+    onTouchCancel={cancelTouch}
     onKeyDown={event => {
       const step = ["ArrowDown", "ArrowRight", "PageDown"].includes(event.key) ? 1 : ["ArrowUp", "ArrowLeft", "PageUp"].includes(event.key) ? -1 : 0;
       if (step || event.key === "Home" || event.key === "End") {

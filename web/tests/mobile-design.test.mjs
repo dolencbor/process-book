@@ -24,6 +24,7 @@ assert.equal(mobile(".tableRange")["align-self"], "flex-start");
 assert.equal(mobile(".tableHeading, .tableRow")["grid-template-columns"], "91px minmax(0, 1fr)");
 assert.equal(mobile(".tableHeading, .tableRow")["column-gap"], "4px");
 assert.equal(mobile(".tableScroll")["scroll-snap-type"], "y mandatory");
+assert.equal(mobile(".scrollViewport")["touch-action"], "pan-x pinch-zoom", "a finger gesture must choose a card on release, not drag the rail");
 assert.equal(mobile(".tableScroll")["z-index"], "1");
 assert.equal(mobile('.tableScroll[data-travelling="true"]')["scroll-snap-type"], "none");
 assert.equal(mobile(".mobileTopRowHighlight").display, "block");

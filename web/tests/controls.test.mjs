@@ -71,6 +71,10 @@ assert.equal(app.selected, 1); assert.equal(app.jumpWeek, 7); assert.equal(app.w
 assert.equal(app.view, "table", "a period click has the same command semantics in both views");
 app.changeWeek(9); app = render();
 assert.equal(app.selected, 1, "intermediate week updates cannot override clicked selection");
+app.changeView("scroll"); app = render();
+assert.equal(app.week, 9, "the Scroll card reopens on the List's selected week");
+app.changeView("table"); app = render();
+assert.equal(app.jumpWeek, 9, "the List row reopens on the Scroll card's selected week");
 appHooks.clear(); app = render();
 assert.equal(app.view, "table", "browser Back restores the active view");
 assert.equal(app.week, 9, "browser Back restores the visible week");

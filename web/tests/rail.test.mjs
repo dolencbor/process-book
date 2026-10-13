@@ -6,11 +6,11 @@ import { motionValue, keyframes } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekScrollView(');
 const end = source.indexOf('  return <div ref={viewport}', start);
-const component = source.slice(start, end) + '  return { interruptTravel, goTo, scroll };\n}';
+const component = source.slice(start, end) + '  return { interruptTravel, goTo, scroll, beginTouch, endTouch, cancelTouch, captureTouchClick, inputPosition, position };\n}';
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
 const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
-function createRail(initialWeek = 0, reduced = false) {
+function createRail(initialWeek = 0, reduced = false, mobile = false) {
   const hooks = [], effects = [], subscriptions = [];
   let index = 0, animation = null, commands = 0, props;
   const seen = [], periods = [], resizeCallbacks = []; let selected = Math.floor(initialWeek / 7);
@@ -22,7 +22,7 @@ function createRail(initialWeek = 0, reduced = false) {
     useRef: value => hook(() => ({ current: value })),
     useState: value => { const entry = hook(() => ({value})); return [entry.value, next => {entry.value = next;}]; },
     useReducedMotion: () => reduced,
-    useMobileLayout: () => false,
+    useMobileLayout: () => mobile,
     useMotionValue: value => hook(() => {
       const m = motionValue(value);
       const stop = m.stop.bind(m);
@@ -113,4 +113,24 @@ manual.element.scrollTop += 180; manual.handlers().scroll(); assert.equal(manual
 const reduced = createRail(0,true); reduced.jump(21);
 assert.equal(reduced.commands,0); assert.deepEqual(reduced.seen,[21]);
 assert.equal(reduced.element.scrollTop,49*180);
+const mobileTap=createRail(5,false,true);
+const tapStart=mobileTap.element.scrollTop;
+mobileTap.handlers().beginTouch({touches:[{clientX:200,clientY:500}]});
+assert.equal(mobileTap.handlers().position.get(),33,'a finger resting on the rail cannot drag a card');
+mobileTap.handlers().endTouch({changedTouches:[{clientX:200,clientY:497}]});
+assert.equal(mobileTap.commands,0,'a tap leaves the selected week in place');
+assert.equal(mobileTap.element.scrollTop,tapStart);
+mobileTap.handlers().beginTouch({touches:[{clientX:200,clientY:500}]});
+mobileTap.handlers().endTouch({changedTouches:[{clientX:201,clientY:440}]});
+assert.equal(mobileTap.commands,1,'one upward swipe starts one week transition after release');
+assert.equal(mobileTap.animation.target,34);
+assert.equal(mobileTap.element.scrollTop,34*180,'the native scroller is aligned to the chosen card');
+assert.equal(mobileTap.handlers().position.get(),33,'the rail animates after the gesture rather than following the finger');
+let prevented=false, stopped=false;
+mobileTap.handlers().captureTouchClick({preventDefault(){prevented=true;},stopPropagation(){stopped=true;}});
+assert(prevented&&stopped,'a swipe cannot accidentally open a week link');
+const mobileReverse=createRail(0,false,true);
+mobileReverse.handlers().beginTouch({touches:[{clientX:200,clientY:400}]});
+mobileReverse.handlers().endTouch({changedTouches:[{clientX:200,clientY:460}]});
+assert.equal(mobileReverse.animation.target,27,'swiping down from Week 01 wraps to Week 28');
 console.log('PASS: locked destination, separate indicator callbacks, resize continuity, and actual Motion keyframes at 60fps visit every intervening week forward/reverse, land exactly, survive intermediate renders, retarget continuously, allow manual takeover, and respect reduced motion.');

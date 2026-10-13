@@ -6,14 +6,15 @@ import { motionValue, keyframes } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekTableView(');
 const end = source.indexOf('  return <div className={styles.tableView}', start);
-const component = source.slice(start, end) + '  return { handleScroll, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition };\n}';
+const component = source.slice(start, end) + '  return { handleScroll, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition, mobileSnapped, listTouching };\n}';
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
 const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
 function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null) {
   const hooks = [], effects = [], periods = [], visibleWeeks = [], navigations = []; let geometryReads=0, rowReads=0;
-  let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, handlers, activeElement = null; const frames = new Map();
+  let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, timerId = 0, handlers, activeElement = null; const frames = new Map(), timers = new Map();
   const flush = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(fn=>fn()); };
+  const flushTimers = () => { const jobs = [...timers.values()]; timers.clear(); jobs.forEach(fn=>fn()); };
   const heading = mobile ? 263 : 281;
   const canvasStyles = new Map(); let highlightWrites = 0;
   const canvas = { style: { getPropertyValue: key => canvasStyles.get(key) ?? '', setProperty: (key,value) => { highlightWrites++; canvasStyles.set(key,value); } } };
@@ -40,6 +41,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   const context = {
     useIsPresent:()=>true, useReducedMotion:()=>reduced, useMobileLayout:()=>mobile,
     requestAnimationFrame:fn=>{frames.set(++frameId,fn);return frameId;},cancelAnimationFrame:id=>frames.delete(id),
+    setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),
     ResizeObserver:class{observe(){}disconnect(){}},
     useCallback:(fn,deps)=>{const state=hook(()=>({fn,deps}));if(deps.some((v,i)=>v!==state.deps[i])){state.fn=fn;state.deps=deps;}return state.fn;},
     useRef:value=>hook(()=>({current:value})),
@@ -66,6 +68,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     element,periods,visibleWeeks,rows,navigations,
     get highlightHeight(){return canvasStyles.get('--mobile-top-row-height');},
     get highlightWrites(){return highlightWrites;},
+    get snapped(){return handlers.mobileSnapped;},
     get cycleHeight(){return rows[28].offsetTop;},
     at(week){return rows[28+week];},
     get preview(){return hooks[9].value;},
@@ -85,7 +88,9 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     get animation(){return animation;},get commands(){return commands;},get category(){return props.category;},
     jump(week){props.category=Math.floor(week/7);props.jumpWeek=week;props.jumpVersion++;render();},
     advance(ms=10000){const a=animation;while(a&&!a.stopped&&a.time<ms){a.time=Math.min(ms,a.time+1000/60);const sample=a.generator.next(a.time);a.options.onUpdate(sample.value);render().handleScroll();flush();if(sample.done){a.options.onComplete();render().handleScroll();flush();break;}}},
-    manual(top){element.scrollTop=top;render().handleScroll();flush();render();},
+    manual(top,settle=true){element.scrollTop=top;render().handleScroll();flush();render();if(settle){flushTimers();render();}},
+    settle(){flushTimers();render();},
+    hold(value){handlers.listTouching.current=value;},
     capture(){render().captureListPosition();},
     interrupt(){render().interruptTravel();render();},
   };
@@ -136,8 +141,22 @@ for (const reducedMotion of [false,true]) {
   mobile.manual(mobile.at(7).offsetTop);
   assert.equal(mobile.highlightHeight,'57.5px','the highlight returns to a single-line height');
   assert.equal(mobile.preview.week,7); assert.equal(mobile.category,1);
-  mobile.manual(mobile.at(14).offsetTop-1);
-  assert.equal(mobile.preview.week,13,'variable row heights determine the first visible row');
+  mobile.manual(mobile.at(14).offsetTop-1,false);
+  assert.equal(mobile.snapped,false,'the gray highlight disappears between snap points');
+  assert.equal(mobile.preview.week,7,'an in-between row cannot replace the last selected week');
+  assert.equal(mobile.visibleWeeks.at(-1),7);
+  mobile.manual(mobile.at(14).offsetTop,false);
+  assert.equal(mobile.snapped,false,'passing exactly through a row start cannot flash the gray highlight');
+  assert.equal(mobile.visibleWeeks.at(-1),7);
+  mobile.hold(true);
+  mobile.settle();
+  assert.equal(mobile.snapped,false,'List never snaps under a finger held on the rows');
+  mobile.hold(false);
+  mobile.manual(mobile.at(14).offsetTop,false);
+  mobile.settle();
+  assert.equal(mobile.element.scrollTop,mobile.at(14).offsetTop);
+  assert.equal(mobile.preview.week,14,'the nearest row becomes selected only after it aligns');
+  assert.equal(mobile.snapped,true,'the gray highlight returns at the settled row');
   const beforeFocusTop=mobile.element.scrollTop, beforeFocusCommands=mobile.commands;
   mobile.focus(49);
   assert.equal(mobile.element.scrollTop,beforeFocusTop,'focusing a navigation link must not move it during a tap');
@@ -159,6 +178,10 @@ for (const reducedMotion of [false,true]) {
   mobile.jump(0);mobile.advance();
   assert.equal(mobile.preview.week,0);assert.equal(mobile.element.scrollTop,mobile.cycleHeight);
 }
+const fromScroll=createTable(852,17,false,true);
+assert.equal(fromScroll.element.scrollTop,fromScroll.at(17).offsetTop,'switching from Scroll places the same week at the List snap slot');
+assert.equal(fromScroll.preview.week,17);
+assert.equal(fromScroll.snapped,true);
 const mobileInterrupted=createTable(852,0,false,true);
 mobileInterrupted.jump(21);mobileInterrupted.advance(100);mobileInterrupted.interrupt();
 assert.equal(mobileInterrupted.element.dataset.travelling,undefined);
@@ -178,21 +201,27 @@ for (const mobile of [false,true]) for (const height of [400,600,900,1200,2200,4
   const looping=createTable(height,0,false,mobile), h=looping.cycleHeight, count=looping.rows.length;
   assert(count>=84);assert(count<=28*(2+Math.ceil(looping.element.clientHeight/h)) || count===84);
   assert.equal(looping.element.scrollTop,h);
-  looping.manual(2*h+12.25);
+  looping.manual(2*h+12.25,false);
   assert.equal(looping.element.scrollTop,h+12.25);assert.equal(looping.visibleWeeks.at(-1),0);assert.equal(looping.category,0);
-  if (mobile) assert.equal(looping.preview.direction,1,'Week 28 → 01 enters in the downward scroll direction');
-  looping.manual(h-12.25);
-  assert.equal(looping.element.scrollTop,2*h-12.25);assert.equal(looping.visibleWeeks.at(-1),27);assert.equal(looping.category,3);
-  if (mobile) assert.equal(looping.preview.direction,-1,'Week 01 → 28 enters in the upward scroll direction');
+  looping.manual(h-12.25,false);
+  assert.equal(looping.element.scrollTop,2*h-12.25);assert.equal(looping.visibleWeeks.at(-1),mobile?0:27);assert.equal(looping.category,3);
+  if (mobile) assert.equal(looping.snapped,false,'a loop crossing remains unhighlighted until it lands');
   for(let lap=0;lap<100;lap++) {
-    looping.manual(2*h+3.75);assert.equal(looping.element.scrollTop,h+3.75);
-    looping.manual(h-3.75);assert.equal(looping.element.scrollTop,2*h-3.75);
+    looping.manual(2*h+3.75,false);assert.equal(looping.element.scrollTop,h+3.75);
+    looping.manual(h-3.75,false);assert.equal(looping.element.scrollTop,2*h-3.75);
   }
   assert.equal(looping.rows.length,count,'scrolling must not grow the DOM');
   looping.jump(7);looping.advance();
   assert.equal(looping.element.scrollTop,looping.at(7).offsetTop);assert.equal(looping.category,1);
 }
 console.log('PASS: List loops seamlessly in both directions for 100 laps, preserves fractional offsets and mobile image direction, stays bounded, fills tall viewports and retains tab navigation after wrapping.');
+const directionLoop=createTable(852,0,false,true);
+directionLoop.manual(directionLoop.rows[27].offsetTop);
+assert.equal(directionLoop.preview.week,27);
+assert.equal(directionLoop.preview.direction,-1,'Week 01 → 28 enters upward after the snap');
+directionLoop.manual(2*directionLoop.cycleHeight);
+assert.equal(directionLoop.preview.week,0);
+assert.equal(directionLoop.preview.direction,1,'Week 28 → 01 enters downward after the snap');
 
 for (const mobile of [false,true]) {
   const keyboard=createTable(852,27,false,mobile);
@@ -206,7 +235,7 @@ for (const mobile of [false,true]) {
   assert.equal(keyboard.commands,0,'recycling link focus must not start a navigation animation');
   if(mobile) {assert.equal(keyboard.preview.week,0); assert.equal(keyboard.category,0);}
   for(let lap=0;lap<5;lap++) {
-    keyboard.manual(2*keyboard.cycleHeight+12.25);
+    keyboard.manual(2*keyboard.cycleHeight+12.25,false);
     assert.equal(keyboard.activeEntry,28,'offscreen focused rows stay in the canonical cycle across multiple laps');
     assert.equal(keyboard.focusedEntry,28);
   }

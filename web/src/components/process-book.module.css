@@ -201,6 +201,9 @@
 .scrollViewport:focus-visible { outline: none; }
 .scrollViewport:focus-visible .stack { outline: 2px solid #006bff; outline-offset: 4px; }
 .scrollTrack { position: relative; height: calc((var(--week-count) - 1) * var(--scroll-step, 180px) + 100dvh); }
+@media (max-width: 700px) {
+  .scrollViewport { touch-action: pan-x pinch-zoom; }
+}
 .textMask { position: relative; display: inline-grid; overflow: hidden; vertical-align: bottom; line-height: 1.15; }
 .textMask > span { grid-area: 1 / 1; display: block; }
 .numberMask { display: inline-flex; justify-content: center; width: 2ch; line-height: 1.15; vertical-align: bottom; }
