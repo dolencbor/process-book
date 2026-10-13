@@ -89,6 +89,7 @@ const ViewSwitcher = memo(function ViewSwitcher({ view, onViewChange, startVisib
 // Both directions share a slower, almost critically damped response and landing.
 const railSpring = { type: "spring", stiffness: 620, damping: 40, mass: 0.7, restDelta: 0.001, restSpeed: 0.01 } satisfies Transition;
 const railSnapSpring = { ...railSpring, stiffness: 300, damping: 32, mass: 0.85 } satisfies Transition;
+const railSwipeVelocityLimit = 0.75 * Math.sqrt(railSnapSpring.stiffness / railSnapSpring.mass);
 
 const categories = [
   { name: "Foundation", icon: "foundation", color: "#000000", ink: "#f6f6f6", tabWidth: 113, labelWidth: 63, iconGap: 10 },
@@ -782,7 +783,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
   const cycleOrigin = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touching = useRef(false);
-  const touchStart = useRef<{ x: number; y: number; time: number } | null>(null);
+  const touchStart = useRef<{ x: number; y: number; time: number; samples: { y: number; time: number }[] } | null>(null);
   const suppressTouchClickUntil = useRef(0);
   const wasActive = useRef(false);
   const handledJump = useRef(-1);
@@ -906,14 +907,15 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     lastPosition.current = latest;
   });
 
-  const movePosition = (target: number, landing = false) => {
+  const movePosition = (target: number, landing = false, gestureVelocity?: number) => {
     if (reducedMotion) { position.jump(target); return; }
     const distance = target - position.get();
     // Carry motion into the landing without letting momentum cross the chosen
-    // card. A new gesture replaces this animation from its current position.
+    // card. The velocity cap stays below this spring's no-overshoot threshold.
+    // A new swipe owns its release velocity; keyboard/wheel retain rail velocity.
     const velocity = Math.sign(distance) * Math.min(
-      Math.max(0, position.getVelocity() * Math.sign(distance)),
-      Math.abs(distance) * 20,
+      Math.max(0, (gestureVelocity ?? position.getVelocity()) * Math.sign(distance)),
+      Math.abs(distance) * railSwipeVelocityLimit,
     );
     animate(position, target, landing ? { ...railSnapSpring, velocity } : railSpring);
   };
@@ -969,7 +971,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     onPeriodChange(periodForWeek(wrapWeek(Math.round(current), weeks.length)));
   };
 
-  const goTo = (value: number, absolute = false) => {
+  const goTo = (value: number, absolute = false, gestureVelocity?: number) => {
     const element = viewport.current;
     if (!element) return;
     interruptTravel();
@@ -978,7 +980,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     const target = absolute ? Math.floor(current / weeks.length) * weeks.length + value : current + value;
     element.focus({ preventScroll: true });
     inputPosition.set(target);
-    movePosition(target, true);
+    movePosition(target, true, gestureVelocity);
     element.scrollTo({ top: (target - cycleOrigin.current) * scrollStep.current, behavior: "instant" });
     rebase();
   };
@@ -989,8 +991,18 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     if (settleTimer.current) clearTimeout(settleTimer.current);
     if (mobile && event.touches.length === 1) {
       const touch = event.touches[0];
-      touchStart.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+      const time = Date.now();
+      touchStart.current = { x: touch.clientX, y: touch.clientY, time, samples: [{ y: touch.clientY, time }] };
     } else touchStart.current = null;
+  };
+
+  const moveTouch = (event: TouchEvent<HTMLDivElement>) => {
+    const start = touchStart.current;
+    if (!mobile || !start || event.touches.length !== 1) return;
+    const time = Date.now();
+    start.samples.push({ y: event.touches[0].clientY, time });
+    // Keep the sample just before the last 100ms as well as recent samples.
+    while (start.samples.length > 2 && start.samples[1].time < time - 100) start.samples.shift();
   };
 
   const endTouch = (event: TouchEvent<HTMLDivElement>) => {
@@ -1002,10 +1014,18 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       if (!start || !touch) return;
       const x = touch.clientX - start.x;
       const y = touch.clientY - start.y;
-      const speed = Math.abs(y) / Math.max(1, Date.now() - start.time);
+      const time = Date.now();
+      const speed = Math.abs(y) / Math.max(1, time - start.time);
       if (Math.abs(y) > Math.abs(x) && (Math.abs(y) >= 28 || (Math.abs(y) >= 12 && speed >= 0.35))) {
+        const recent = start.samples.find(sample => sample.time >= time - 100) ?? start.samples.at(-1)!;
+        const recentY = touch.clientY - recent.y;
+        const direction = y < 0 ? 1 : -1;
+        // Translate release speed from px/ms to weeks/s. The rail does not
+        // follow the finger; this velocity affects only the post-release snap.
+        const releaseVelocity = direction * Math.min(railSwipeVelocityLimit,
+          Math.max(0, -recentY * direction) / Math.max(1, time - recent.time) * 1000 / scrollStep.current * 1.6);
         suppressTouchClickUntil.current = Date.now() + 400;
-        goTo(y < 0 ? 1 : -1);
+        goTo(direction, false, releaseVelocity);
       }
       return;
     }
@@ -1032,6 +1052,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     onWheel={interruptTravel}
     onClickCapture={captureTouchClick}
     onTouchStart={beginTouch}
+    onTouchMove={moveTouch}
     onTouchEnd={endTouch}
     onTouchCancel={cancelTouch}
     onKeyDown={event => {

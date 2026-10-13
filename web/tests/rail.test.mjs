@@ -2,17 +2,19 @@ import fs from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 import ts from "typescript";
-import { motionValue, keyframes } from "motion";
+import { motionValue, keyframes, spring } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekScrollView(');
 const end = source.indexOf('  return <div ref={viewport}', start);
-const component = source.slice(start, end) + '  return { interruptTravel, goTo, scroll, beginTouch, endTouch, cancelTouch, captureTouchClick, inputPosition, position };\n}';
+const component = source.slice(start, end) + '  return { interruptTravel, goTo, scroll, beginTouch, moveTouch, endTouch, cancelTouch, captureTouchClick, inputPosition, position };\n}';
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
-const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
+const springStart = source.indexOf('const railSpring =');
+const springEnd = source.indexOf('\n\nconst categories', springStart);
+const js = ts.transpile(source.slice(springStart, springEnd) + '\n' + source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
 function createRail(initialWeek = 0, reduced = false, mobile = false) {
   const hooks = [], effects = [], subscriptions = [];
-  let index = 0, animation = null, commands = 0, props;
+  let index = 0, animation = null, commands = 0, props, now = 0;
   const seen = [], periods = [], resizeCallbacks = []; let selected = Math.floor(initialWeek / 7);
   const element = { clientHeight: 900, scrollTop: 0, style: { setProperty() {} }, scrollTo({top}) { this.scrollTop = top; }, focus() {} };
   const cards = { clientWidth: 530 };
@@ -39,14 +41,16 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
     animate: (value, target, options) => {
       commands++;
       animation = { value, target, options, stopped: false, time: 0,
-        generator: keyframes({ keyframes: [value.get(), target], duration: options.duration * 1000, ease: options.ease }) };
+        generator: options.type === 'spring'
+          ? spring({ keyframes: [value.get(), target], ...options })
+          : keyframes({ keyframes: [value.get(), target], duration: options.duration * 1000, ease: options.ease }) };
     },
     weeks: Array.from({length: 28}),
     wrapWeek: n => ((n % 28) + 28) % 28,
     periodForWeek: n => Math.floor(n / 7),
     railRevealDistance: 4,
     interfaceTransition: { type: 'tween', duration: .68, ease: [.22, 1, .36, 1] },
-    railSpring: {}, railSnapSpring: {},
+    Date: { now: () => now },
     ResizeObserver: class { constructor(callback) { resizeCallbacks.push(callback); } observe() {} disconnect() {} }, setTimeout, clearTimeout,
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
@@ -64,6 +68,7 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
   render();
   return {
     seen, element, periods,
+    tick(ms) { now += ms; },
     get selected() { return selected; },
     resize(height) { if (height) element.clientHeight = height; resizeCallbacks.forEach(fn => fn()); render(); },
     get commands() { return commands; }, get animation() { return animation; },
@@ -74,7 +79,7 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
         a.time = Math.min(ms, a.time + 1000 / 60);
         const sample = a.generator.next(a.time);
         a.value.set(sample.value); render();
-        if (sample.done) { a.options.onComplete(); break; }
+        if (sample.done) { a.options.onComplete?.(); break; }
       }
     },
     handlers: render,
@@ -133,4 +138,37 @@ const mobileReverse=createRail(0,false,true);
 mobileReverse.handlers().beginTouch({touches:[{clientX:200,clientY:400}]});
 mobileReverse.handlers().endTouch({changedTouches:[{clientX:200,clientY:460}]});
 assert.equal(mobileReverse.animation.target,27,'swiping down from Week 01 wraps to Week 28');
-console.log('PASS: locked destination, separate indicator callbacks, resize continuity, and actual Motion keyframes at 60fps visit every intervening week forward/reverse, land exactly, survive intermediate renders, retarget continuously, allow manual takeover, and respect reduced motion.');
+assert(mobileReverse.animation.options.velocity < 0, 'reverse swipes carry velocity toward the previous card');
+
+function swipeWithDuration(duration) {
+  const rail = createRail(5, false, true);
+  rail.handlers().beginTouch({ touches: [{ clientX: 200, clientY: 500 }] });
+  rail.tick(duration * 0.6);
+  rail.handlers().moveTouch({ touches: [{ clientX: 200, clientY: 460 }] });
+  assert.equal(rail.handlers().position.get(), 33, 'touchmove never drags a card');
+  rail.tick(duration * 0.4);
+  rail.handlers().endTouch({ changedTouches: [{ clientX: 200, clientY: 440 }] });
+  return rail;
+}
+const slowSwipe = swipeWithDuration(300);
+const fastSwipe = swipeWithDuration(70);
+assert.equal(slowSwipe.animation.target, fastSwipe.animation.target, 'speed changes timing, not the selected week');
+assert(fastSwipe.animation.options.velocity > slowSwipe.animation.options.velocity, 'a flick gives the spring more initial speed');
+assert(fastSwipe.animation.options.velocity <= 0.75 * Math.sqrt(fastSwipe.animation.options.stiffness / fastSwipe.animation.options.mass),
+  'gesture velocity is capped below overshoot');
+const slowFrame = slowSwipe.animation.generator.next(100).value;
+const fastFrame = fastSwipe.animation.generator.next(100).value;
+assert(fastFrame > slowFrame, 'the quicker flick progresses farther within the first 100ms');
+for (const rail of [slowSwipe, fastSwipe, mobileReverse]) {
+  const from = rail.animation.value.get(), to = rail.animation.target;
+  const low = Math.min(from, to), high = Math.max(from, to);
+  let previous = from;
+  for (let time = 0; time <= 650; time += 1000 / 60) {
+    const sample = rail.animation.generator.next(time);
+    assert(sample.value >= low - 0.0001 && sample.value <= high + 0.0001, 'the snap never overshoots a card');
+    assert((sample.value - previous) * Math.sign(to - from) >= -0.0001, 'the snap remains monotonic');
+    previous = sample.value;
+    if (sample.done) break;
+  }
+}
+console.log('PASS: locked destination, separate indicator callbacks, resize continuity, and actual Motion keyframes at 60fps visit every intervening week forward/reverse, land exactly, survive intermediate renders, retarget continuously, allow manual takeover, and respect reduced motion. Mobile flick velocity accelerates a one-card, no-drag snap without overshoot.');
