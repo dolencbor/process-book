@@ -299,6 +299,15 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const [copies, setCopies] = useState(3);
   const previewEntry = useRef(weeks.length + jumpWeek);
   const recyclingFocus = useRef(false);
+  const sizeMobileHighlight = useCallback((entry: number) => {
+    if (!mobile) return;
+    const row = rowGeometry.current.rows[entry];
+    const canvas = viewport.current?.parentElement;
+    if (!row || !canvas) return;
+    const height = `${row.offsetHeight}px`;
+    if (canvas.style.getPropertyValue("--mobile-top-row-height") !== height)
+      canvas.style.setProperty("--mobile-top-row-height", height);
+  }, [mobile]);
   useLayoutEffect(() => {
     const scroll = viewport.current;
     const element = table.current;
@@ -313,13 +322,17 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         rows, ends: rows.map(row => row.offsetTop + row.offsetHeight), cycleHeight,
         ready: cycleHeight > 0 && rows.length >= needed * weeks.length,
       };
+      if (mobile && rowGeometry.current.ready) {
+        const entry = rowGeometry.current.ends.findIndex(end => end > scroll.scrollTop + 0.5);
+        if (entry >= 0) sizeMobileHighlight(entry);
+      }
       if (needed > copies) setCopies(needed);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(scroll); observer.observe(element);
     return () => observer.disconnect();
-  }, [copies, weeks.length]);
+  }, [copies, mobile, sizeMobileHighlight, weeks.length]);
   useEffect(() => () => { cancelAnimationFrame(pointerFrame.current); pointerFrame.current = 0; }, [active]);
 
   const recycle = useCallback(() => {
@@ -354,7 +367,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const index = Math.max(0, ends.findIndex(end => end > scroll.scrollTop + 0.5));
     const week = Number(rows[index].dataset.tableWeek);
     const period = periodForWeek(week);
-    if (mobile) show(index);
+    if (mobile) {
+      if (indicated.current.week !== week) sizeMobileHighlight(index);
+      if (previewEntry.current !== index || !visible.current) show(index);
+    }
     if (indicated.current.week !== week) { indicated.current.week = week; onWeekChange(week); }
     if (indicated.current.period !== period) { indicated.current.period = period; onPeriodChange(period); }
   };
@@ -439,7 +455,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       delete scroll.dataset.travelling;
       indicated.current.week = index;
       onWeekChange(index);
-      if (mobile) show(weeks.length + index);
+      if (mobile) { sizeMobileHighlight(weeks.length + index); show(weeks.length + index); }
     };
     if (immediate || reducedMotion || Math.abs(target - scroll.scrollTop) < 0.001) {
       write(target); finish(); return;
@@ -451,12 +467,14 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         write(value);
         const { rows, ends } = rowGeometry.current;
         const visibleIndex = ends.findIndex(end => end > scroll.scrollTop + 0.5);
-        const next = Number(rows[visibleIndex < 0 ? rows.length - 1 : visibleIndex].dataset.tableWeek);
+        const entry = visibleIndex < 0 ? rows.length - 1 : visibleIndex;
+        const next = Number(rows[entry].dataset.tableWeek);
         if (indicated.current.week !== next) {
           indicated.current.week = next;
           onWeekChange(next);
+          if (mobile) sizeMobileHighlight(entry);
         }
-        if (mobile) show(visibleIndex < 0 ? rows.length - 1 : visibleIndex);
+        if (mobile && (previewEntry.current !== entry || !visible.current)) show(entry);
       },
       onComplete: finish,
     });
@@ -468,7 +486,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         delete scroll.dataset.travelling;
       }
     };
-  }, [active, mobile, reducedMotion, onWeekChange, show, recycle, weeks.length]);
+  }, [active, mobile, reducedMotion, onWeekChange, show, recycle, sizeMobileHighlight, weeks.length]);
 
   useLayoutEffect(() => {
     if (!rowGeometry.current.ready) return;
@@ -485,12 +503,12 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         writtenTop.current = viewport.current.scrollTop;
         indicated.current.week = initialListLocation.week;
         indicated.current.period = periodForWeek(initialListLocation.week);
-        if (mobile) show(weeks.length + initialListLocation.week);
+        if (mobile) { sizeMobileHighlight(weeks.length + initialListLocation.week); show(weeks.length + initialListLocation.week); }
         return;
       }
     }
     return goToWeek(index, firstPlacement);
-  }, [jumpWeek, jumpVersion, initialListLocation, goToWeek, copies, mobile, periodForWeek, show, weeks.length]);
+  }, [jumpWeek, jumpVersion, initialListLocation, goToWeek, copies, mobile, periodForWeek, show, sizeMobileHighlight, weeks.length]);
 
   const trackPointer = useCallback(() => {
     if (mobile) return;
@@ -552,6 +570,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       <TablePeriodHeading period={category} reducedMotion={reducedMotion} />
       <div className={styles.tableHeading} aria-hidden><span>Week</span><span>Title</span></div>
     </motion.div>
+    <div className={styles.mobileTopRowHighlight} aria-hidden />
     <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onWheel={interruptTravel} onTouchStart={interruptTravel}
       onKeyDownCapture={event => {
         if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) interruptTravel();
@@ -571,7 +590,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
             }}>
             {Array.from({ length: copies * weeks.length }, (_, entry) => <TableRow key={entry}
               index={entry % weeks.length} entryIndex={entry}
-              preview={preview.visible && preview.week === entry % weeks.length}
+              preview={!mobile && preview.visible && preview.week === entry % weeks.length}
               onFocus={focusWeek} onBlur={blurWeek} />)}
           </div>
         </div>
@@ -627,13 +646,14 @@ function railScreenReveal(reducedMotion: boolean | null) {
   };
 }
 
-const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, gap = 8, slot, reducedMotion, cardPointerHandlers, cursorActive, onNavigate }: {
+const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, gap = 8, slot, mobile = false, reducedMotion, cardPointerHandlers, cursorActive, onNavigate }: {
   entry: number;
   position: MotionValue<number>;
   arrival: MotionValue<number>;
   cardSize: number;
   gap?: number;
   slot: number;
+  mobile?: boolean;
   reducedMotion: boolean | null;
   cardPointerHandlers: CardPointerHandlers;
   cursorActive: boolean;
@@ -641,6 +661,10 @@ const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, ga
 }) {
   const { weeks } = useProcessBookContent();
   const center = slot === 0;
+  const farHeight = cardSize * (mobile ? 50 / 332 : 0.150944);
+  const nearHeight = cardSize * (mobile ? 75 / 332 : 0.226415);
+  const farWidth = cardSize * (mobile ? 256 / 332 : 0.773585);
+  const nearWidth = cardSize * (mobile ? 294 / 332 : 0.886792);
   // Recycle each image only beyond the masked ends; the visible rail stays continuous.
   const restingOffset = useTransform(position, value => {
     const progress = reducedMotion ? Math.round(value) : value;
@@ -651,12 +675,13 @@ const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, ga
   // offset, which would populate the top before those cards have scrolled in.
   const offset = useTransform(() => restingOffset.get() + arrival.get());
   const top = useTransform(offset, railSlots, [
-    -cardSize * 0.150944 - gap, 0, cardSize * 0.150944 + gap,
-    cardSize * 0.377359 + gap * 2, cardSize * 1.377359 + gap * 3,
-    cardSize * 1.603774 + gap * 4, cardSize * 1.754718 + gap * 5,
+    -farHeight - gap, 0, farHeight + gap,
+    farHeight + nearHeight + gap * 2, farHeight + nearHeight + cardSize + gap * 3,
+    farHeight + nearHeight * 2 + cardSize + gap * 4,
+    farHeight * 2 + nearHeight * 2 + cardSize + gap * 5,
   ]);
-  const height = useTransform(offset, railSlots, [0.150944, 0.150944, 0.226415, 1, 0.226415, 0.150944, 0.150944].map(value => value * cardSize));
-  const width = useTransform(offset, railSlots, [0.773585, 0.773585, 0.886792, 1, 0.886792, 0.773585, 0.773585].map(value => value * cardSize));
+  const height = useTransform(offset, railSlots, [farHeight, farHeight, nearHeight, cardSize, nearHeight, farHeight, farHeight]);
+  const width = useTransform(offset, railSlots, [farWidth, farWidth, nearWidth, cardSize, nearWidth, farWidth, farWidth]);
   const left = useTransform(width, value => (cardSize - value) / 2);
   const edgeOpacity = useTransform(offset, railSlots, [0, 1, 1, 1, 1, 1, 0]);
   const restingOpacity = useTransform(restingOffset, railSlots, [0, 1, 1, 1, 1, 1, 0]);
@@ -665,7 +690,7 @@ const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, ga
   const opacity = useTransform(() => Math.min(edgeOpacity.get(), restingOpacity.get()));
 
   return <MotionLink href={weeks[entry].href} prefetch={center} className={`${styles.stackCard} ${center ? styles.mainCard : Math.abs(slot) === 1 ? styles.near : styles.far}`}
-    data-smooth-corners={center ? "0.6" : "0"} data-center={center} data-week={entry + 1}
+    data-smooth-corners={center ? "0.6" : undefined} data-center={center} data-week={entry + 1}
     data-cursor-active={center && cursorActive} aria-hidden={!center} tabIndex={center ? 0 : -1}
     aria-label={center ? `Explore week ${weeks[entry].number}: ${weeks[entry].title}` : undefined}
     onClick={center ? () => onNavigate(entry) : undefined}
@@ -939,7 +964,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
         <motion.div ref={stack} className={styles.stack} style={{ "--rail-arrival": arrival } as HTMLMotionProps<"div">["style"]}
           variants={railScreenReveal(reducedMotion)}>
           {cardSize > 0 ? visibleRailEntries(week, weeks.length).map(index => <RailCard key={weeks[index].id} entry={index} position={position} arrival={arrival} cardSize={cardSize} gap={mobile ? 6 : 8}
-            slot={railOffset(index, week, weeks.length)} reducedMotion={reducedMotion} cardPointerHandlers={cardPointerHandlers} cursorActive={index === week && cursorActive} onNavigate={onNavigate} />) : null}
+            slot={railOffset(index, week, weeks.length)} mobile={mobile} reducedMotion={reducedMotion} cardPointerHandlers={cardPointerHandlers} cursorActive={index === week && cursorActive} onNavigate={onNavigate} />) : null}
           <span className={styles.topFade} aria-hidden /><span className={styles.bottomFade} aria-hidden />
         </motion.div>
         <p className={`${styles.selectedTitle} ${styles.screenTextMask}`} aria-label={weeks[week].title}>

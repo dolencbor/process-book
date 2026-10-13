@@ -191,6 +191,11 @@ assert.equal(cardHref,currentContent.weeks[0].href);
 assert.equal(rowHref,cardHref,"the card and List row open exactly the same post URL");
 assert.match(card,/<a\b/); assert.match(row,/<a\b/);
 assert(!row.includes("<button"),"List rows use native navigation links");
+const offCenterCard = renderToStaticMarkup(React.createElement(compiledModule.exports.TestRailCard, {
+  entry: 1, position: actualMotion.motionValue(0), arrival: actualMotion.motionValue(0), cardSize: 332,
+  slot: 1, mobile: true, reducedMotion: false, cardPointerHandlers: {}, cursorActive: false,
+}));
+assert(!offCenterCard.includes('data-smooth-corners'), 'moving non-center cards use native circular corners without per-frame SVG path work');
 const mobileRow = renderToStaticMarkup(React.createElement(compiledModule.exports.TestTableRow, { index: 0, entryIndex: 28, preview: false, mobile: true, onFocus() {}, onBlur() {} }));
 assert.equal(mobileRow.match(/<a\b[^>]*href="([^"]+)"/)[1],cardHref,"mobile and recycled copies preserve the same destination");
 console.log("PASS: Scroll cards, desktop/mobile List rows and recycled rows are native links to the same CMS week page.");

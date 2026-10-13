@@ -37,14 +37,14 @@ for(const width of [144,320,377,684,1496,2048])for(let selected=0;selected<4;sel
  assert(widths.reduce((a,b)=>a+b,12)<=width+.00001);
  sizes.forEach((size,index)=>{if(size==='medium')assert.equal(widths[index],width<=684?width-108:context.tabCategories[index].tabWidth);});
 }
-// The mobile reference uses the same moving rail with 6px gaps: at 393x852,
-// its five resting cards start at page y=270,324,402,726,804.
+// The resized 393x852 mobile rail keeps the same scroll animation and 6px gaps.
+// Its five resting cards start at page y=246,302,383,721,802.
 for (let slot=-2;slot<=2;slot++) {
- const geometry=context.RailCard({entry:14+slot,position:motionValue(14),arrival:motionValue(0),cardSize:318,gap:6,slot,reducedMotion:false,cardPointerHandlers:{},cursorActive:false});
- const expected=[0,54,132,456,534][slot+2];
+ const geometry=context.RailCard({entry:14+slot,position:motionValue(14),arrival:motionValue(0),cardSize:332,gap:6,slot,mobile:true,reducedMotion:false,cardPointerHandlers:{},cursorActive:false});
+ const expected=[0,56,137,475,556][slot+2];
  assert(Math.abs(geometry.top.get()-expected)<.001);
- assert(Math.abs(geometry.width.get()-[246,282,318,282,246][slot+2])<.001);
- assert(Math.abs(geometry.height.get()-[48,72,318,72,48][slot+2])<.001);
+ assert(Math.abs(geometry.width.get()-[256,294,332,294,256][slot+2])<.001);
+ assert(Math.abs(geometry.height.get()-[50,75,332,75,50][slot+2])<.001);
 }
 const tween=source.match(/const interfaceTransition = ([^;]+) satisfies Transition/)[1];
 const transition=vm.runInNewContext('('+tween+')');

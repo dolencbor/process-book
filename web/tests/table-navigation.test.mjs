@@ -15,7 +15,9 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, handlers, activeElement = null; const frames = new Map();
   const flush = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(fn=>fn()); };
   const heading = mobile ? 263 : 281;
-  const element = { dataset:{},clientHeight: height - heading, scrollHeight: 0, getBoundingClientRect(){geometryReads++;return{top:heading,bottom:height};} };
+  const canvasStyles = new Map(); let highlightWrites = 0;
+  const canvas = { style: { getPropertyValue: key => canvasStyles.get(key) ?? '', setProperty: (key,value) => { highlightWrites++; canvasStyles.set(key,value); } } };
+  const element = { dataset:{},parentElement:canvas,clientHeight: height - heading, scrollHeight: 0, getBoundingClientRect(){geometryReads++;return{top:heading,bottom:height};} };
   const media={clientWidth:371,offsetParent:{getBoundingClientRect(){geometryReads++;return{top:76};}}};
   Object.defineProperty(element,'scrollTop',{get:()=>top,set:v=>{top=Math.max(0,Math.min(element.scrollHeight-element.clientHeight,v));}});
   const rows = [];
@@ -62,6 +64,8 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   render(); render();
   return {
     element,periods,visibleWeeks,rows,navigations,
+    get highlightHeight(){return canvasStyles.get('--mobile-top-row-height');},
+    get highlightWrites(){return highlightWrites;},
     get cycleHeight(){return rows[28].offsetTop;},
     at(week){return rows[28+week];},
     get preview(){return hooks[9].value;},
@@ -125,8 +129,12 @@ for (const reducedMotion of [false,true]) {
   const mobile=createTable(852,0,reducedMotion,true);
   assert.equal(mobile.preview.visible,true);
   assert.equal(mobile.preview.week,0,'first row is selected and pictured immediately');
+  assert.equal(mobile.highlightHeight,'57.5px','one fixed highlight covers the first snapped row');
   assert.equal(mobile.element.dataset.travelling,undefined);
+  mobile.manual(mobile.at(1).offsetTop);
+  assert.equal(mobile.highlightHeight,'108.5px','the fixed highlight grows for a wrapped top row');
   mobile.manual(mobile.at(7).offsetTop);
+  assert.equal(mobile.highlightHeight,'57.5px','the highlight returns to a single-line height');
   assert.equal(mobile.preview.week,7); assert.equal(mobile.category,1);
   mobile.manual(mobile.at(14).offsetTop-1);
   assert.equal(mobile.preview.week,13,'variable row heights determine the first visible row');
@@ -157,6 +165,11 @@ assert.equal(mobileInterrupted.element.dataset.travelling,undefined);
 assert(mobileInterrupted.animation.stopped);
 mobileInterrupted.manual(mobileInterrupted.at(7).offsetTop);
 assert.equal(mobileInterrupted.preview.week,7);assert.equal(mobileInterrupted.category,1);
+const mobileWorkload=createTable(852,14,false,true);
+const highlightWrites=mobileWorkload.highlightWrites;
+const mobileBurst=mobileWorkload.burst(1000,mobileWorkload.at(14).offsetTop);
+assert.equal(mobileBurst.queued,1,'mobile scroll and touch-adjacent events share one frame');
+assert.equal(mobileWorkload.highlightWrites,highlightWrites,'stationary mobile rows do not repaint the fixed highlight during rapid scroll events');
 console.log('PASS: mobile preview follows the top row across variable heights, link focus and tab travel; native snapping is restored on arrival/interruption.');
 
 // Boundary crossings preserve sub-row position, update the correct period,

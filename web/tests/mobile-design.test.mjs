@@ -24,7 +24,12 @@ assert.equal(mobile(".tableRange")["align-self"], "flex-start");
 assert.equal(mobile(".tableHeading, .tableRow")["grid-template-columns"], "91px minmax(0, 1fr)");
 assert.equal(mobile(".tableHeading, .tableRow")["column-gap"], "4px");
 assert.equal(mobile(".tableScroll")["scroll-snap-type"], "y mandatory");
+assert.equal(mobile(".tableScroll")["z-index"], "1");
 assert.equal(mobile('.tableScroll[data-travelling="true"]')["scroll-snap-type"], "none");
+assert.equal(mobile(".mobileTopRowHighlight").display, "block");
+assert.equal(mobile(".mobileTopRowHighlight").top, "calc(var(--table-heading-height) - var(--table-top))");
+assert.equal(mobile(".mobileTopRowHighlight").height, "var(--mobile-top-row-height, 57.5px)");
+assert.equal(mobile('.tableRow[data-preview="true"]').background, "transparent", "mobile highlight is one fixed slot, not repeated row backgrounds");
 assert.equal(mobile(".tableRow")["scroll-snap-align"], "start");
 assert.equal(mobile(".tableRow")["min-height"], "57.5px");
 assert.equal(mobile(".tableRow").height, "auto", "long titles must expand the row");
@@ -33,7 +38,9 @@ assert.equal(mobile(".rowPreview").right, "8px");
 assert.equal(mobile(".rowPreview").width, "min(178px, 45.3vw)");
 assert.equal(mobile(".rowPreview").bottom, "calc(72px + env(safe-area-inset-bottom, 0px))");
 assert.equal(mobile(".rowPreviewMask").translate, "0 0");
-assert.equal(mobile(".viewToggle").bottom, "calc(16px + env(safe-area-inset-bottom, 0px))");
+assert.equal(mobile(".viewToggle").bottom, "calc(16.2px + env(safe-area-inset-bottom, 0px))");
+assert.equal(mobile(".viewToggle").scale, "1.2");
+assert.equal(mobile(".viewToggle")["transform-origin"], "center bottom");
 assert.equal(mobile('.viewToggle[data-view-mode="scroll"]').bottom, undefined, "both views share one mobile switcher position");
 assert.equal(mobile(".selectedWeek, .selectedTitle")["letter-spacing"], "-0.02em");
 assert.equal(mobile(".selectedWeek")["grid-row"], "2");
@@ -44,7 +51,7 @@ assert.equal(mobile(".near")["--corner-radius"], "18px");
 assert.equal(mobile(".mainCard")["--corner-radius"], "24px");
 assert.equal(mobile(".selectedWeek .number")["font-feature-settings"], '"lnum" 1, "tnum" 1, "zero" 0');
 const stage = mobile(".scrollStage");
-assert.equal(stage["grid-template-rows"], "minmax(0, 1fr) 16px 10px 16px minmax(0, 1fr) var(--rail-height)");
+assert.equal(stage["grid-template-rows"], "minmax(0, 1fr) 16px 8px 16px minmax(0, 1fr) var(--rail-height)");
 const evaluateSize = (expression, width, height, cardSize) => vm.runInNewContext(expression
   .replaceAll("var(--card-size)", String(cardSize)).replaceAll("100vw", String(width)).replaceAll("100dvh", String(height))
   .replaceAll("px", "").replaceAll("calc", "").replaceAll("min(", "Math.min("));
@@ -52,15 +59,15 @@ for (const [width, height] of [[393,852],[375,667],[320,568],[700,900],[393,400]
   const card = evaluateSize(stage["--card-size"], width, height);
   const railHeight = evaluateSize(stage["--rail-height"], width, height, card);
   const stackTop = height - railHeight;
-  const labelTop = 76 + (stackTop - 76 - 42) / 2;
+  const labelTop = 76 + (stackTop - 76 - 40) / 2;
   assert(labelTop >= 76, "the text fits between the fixed tabs and card stack at short heights");
-  assert(Math.abs(labelTop + 21 - (76 + stackTop) / 2) < .001, "the label block stays centered between the tabs and cards");
+  assert(Math.abs(labelTop + 20 - (76 + stackTop) / 2) < .001, "the label block stays centered between the tabs and cards");
   assert(card <= width - 16, "the rail fits the mobile width");
   if (width === 393 && height === 852) {
-    assert.equal(card, 318);
-    assert(Math.abs(stackTop - 270) < .001);
-    assert(Math.abs(labelTop - 152) < .001);
-    assert.equal(height - 16 - 32, 804, "Scroll switcher matches Figma's bottom placement");
+    assert.equal(card, 332);
+    assert(Math.abs(stackTop - 246) < .001);
+    assert(Math.abs(labelTop - 141) < .001);
+    assert.equal(height - 16.2 - 32 * 1.2, 797.4, "Scroll switcher matches Figma's bottom placement");
   }
 }
 assert.equal(mobile(".topFade, .bottomFade")["background-image"], 'url("/design/mobile-rail-fade.webp")');
@@ -72,8 +79,8 @@ assert(fadePixels[0].equals(fadePixels[1]), "the mobile gradient asset is preser
 const previewWidth = Number(mobile(".rowPreview").width.match(/\d+/)[0]);
 const previewBottom = Number(mobile(".rowPreview").bottom.match(/\d+/)[0]);
 assert.equal(852 - previewBottom - previewWidth, 602, "preview's page top");
-const switcherBottom = Number(mobile(".viewToggle").bottom.match(/\d+/)[0]);
-assert.equal(852 - switcherBottom - 32, 804, "switcher's page top in both Scroll and List");
+const switcherBottom = Number(mobile(".viewToggle").bottom.match(/[\d.]+/)[0]);
+assert.equal(852 - switcherBottom - 32 * 1.2, 797.4, "switcher's page top in both Scroll and List");
 const titleTop = Number(mobile(".tableHeader").padding.match(/\d+/)[0]);
 assert.equal(titleTop + parseFloat(mobile(".tableHero")["font-size"]), 160, "range begins directly below the title");
 assert.equal(parseFloat(mobile(".tableRow").padding.split(" ")[1]) + parseFloat(mobile(".tableHeading, .tableRow")["grid-template-columns"]) + parseFloat(mobile(".tableHeading, .tableRow")["column-gap"]), 103, "row title x position");
