@@ -1,5 +1,12 @@
 import { defineQuery } from "next-sanity";
 
+export const WEEK_POST_QUERY = defineQuery(`
+  *[_type == "post" && _id == $id][0] {
+    _id, title, weekNumber, entryDate, coverImage, body,
+    "category": category->{title, key}
+  }
+`);
+
 export const PROCESS_BOOK_QUERY = defineQuery(`
   {
     "categories": *[_type == "category" && defined(key)]{_id, title, key},

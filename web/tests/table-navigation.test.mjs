@@ -6,12 +6,12 @@ import { motionValue, keyframes } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekTableView(');
 const end = source.indexOf('  return <div className={styles.tableView}', start);
-const component = source.slice(start, end) + '  return { handleScroll, interruptTravel, indicatePeriod, schedulePointer, selectRow, trackPointer, focusWeek, blurWeek };\n}';
+const component = source.slice(start, end) + '  return { handleScroll, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition };\n}';
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
 const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
-function createTable(height = 900, week = 0, reduced = false, mobile = false) {
-  const hooks = [], effects = [], periods = [], visibleWeeks = []; let geometryReads=0, rowReads=0;
+function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null) {
+  const hooks = [], effects = [], periods = [], visibleWeeks = [], navigations = []; let geometryReads=0, rowReads=0;
   let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, handlers, activeElement = null; const frames = new Map();
   const flush = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(fn=>fn()); };
   const heading = mobile ? 263 : 281;
@@ -49,22 +49,22 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false) {
       const a=animation;return{stop(){a.stopped=true;}};
     },
     document:{get activeElement(){return activeElement;},elementFromPoint:()=>({closest:()=>rows[42]})},
-    weeks:Array.from({length:28}),periodForWeek:n=>Math.floor(n/7),
+    weeks:Array.from({length:28},(_,index)=>({id:`fixture-${index}`})),periodForWeek:n=>Math.floor(n/7),
     interfaceTransition:{type:'tween',duration:.68,ease:[.22,1,.36,1]},
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
   vm.createContext(context);vm.runInContext(js,context);
-  const props={category:Math.floor(week/7),jumpWeek:week,jumpVersion:0,active:true,onWeekSelect(){},
+  const props={category:Math.floor(week/7),jumpWeek:week,jumpVersion:0,initialListLocation,active:true,onWeekSelect(){},
+    onNavigate:(week,location)=>navigations.push({week,location}),
     onWeekChange:week=>visibleWeeks.push(week),onPeriodChange:period=>{props.category=period;periods.push(period);}};
   const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[16].value);effects.splice(0).forEach(fn=>fn());return handlers;};
   render(); render();
   return {
-    element,periods,visibleWeeks,rows,
+    element,periods,visibleWeeks,rows,navigations,
     get cycleHeight(){return rows[28].offsetTop;},
     at(week){return rows[28+week];},
     get preview(){return hooks[9].value;},
-    tap(index){render().selectRow(index);render();},
     focus(entry){ render(); rows[entry].querySelector().focus(); render(); },
     get focusedEntry(){return hooks[6].current;},
     get activeEntry(){return rows.findIndex(row=>row.contains(activeElement));},
@@ -82,10 +82,18 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false) {
     jump(week){props.category=Math.floor(week/7);props.jumpWeek=week;props.jumpVersion++;render();},
     advance(ms=10000){const a=animation;while(a&&!a.stopped&&a.time<ms){a.time=Math.min(ms,a.time+1000/60);const sample=a.generator.next(a.time);a.options.onUpdate(sample.value);render().handleScroll();flush();if(sample.done){a.options.onComplete();render().handleScroll();flush();break;}}},
     manual(top){element.scrollTop=top;render().handleScroll();flush();render();},
+    capture(){render().captureListPosition();},
     interrupt(){render().interruptTravel();render();},
   };
 }
 const table=createTable();assert.equal(table.element.scrollTop,table.cycleHeight);
+const restoredTable=createTable(900,13,false,false,{week:13,offset:0.42});
+assert(Math.abs(restoredTable.element.scrollTop-(restoredTable.at(13).offsetTop+restoredTable.at(13).offsetHeight*0.42))<0.001,
+  'browser Back restores the same fractional position inside a List row before paint');
+restoredTable.capture();
+assert.equal(restoredTable.navigations[0].week,13);
+assert.equal(restoredTable.navigations[0].location.weekId,'fixture-13');
+assert(Math.abs(restoredTable.navigations[0].location.offset-0.42)<0.001);
 table.jump(21);assert.equal(table.animation.target,table.at(21).offsetTop);table.advance(200);
 assert.equal(table.category,3);assert.deepEqual(table.periods,[]);assert.equal(table.commands,1);
 assert(table.visibleWeeks.length>1,'tab travel visually visits the intervening weeks');
@@ -122,7 +130,12 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.preview.week,7); assert.equal(mobile.category,1);
   mobile.manual(mobile.at(14).offsetTop-1);
   assert.equal(mobile.preview.week,13,'variable row heights determine the first visible row');
-  mobile.tap(49);
+  const beforeFocusTop=mobile.element.scrollTop, beforeFocusCommands=mobile.commands;
+  mobile.focus(49);
+  assert.equal(mobile.element.scrollTop,beforeFocusTop,'focusing a navigation link must not move it during a tap');
+  assert.equal(mobile.commands,beforeFocusCommands,'link focus updates its preview without starting scroll travel');
+  assert.equal(mobile.preview.week,21);
+  mobile.jump(21);
   assert.equal(mobile.category,3);
   if (!reducedMotion) {
     assert.equal(mobile.element.dataset.travelling,'true','native snap is suspended during Motion writes');
@@ -144,7 +157,7 @@ assert.equal(mobileInterrupted.element.dataset.travelling,undefined);
 assert(mobileInterrupted.animation.stopped);
 mobileInterrupted.manual(mobileInterrupted.at(7).offsetTop);
 assert.equal(mobileInterrupted.preview.week,7);assert.equal(mobileInterrupted.category,1);
-console.log('PASS: mobile preview follows the top row across variable heights, taps and tab travel; native snapping is restored on arrival/interruption.');
+console.log('PASS: mobile preview follows the top row across variable heights, link focus and tab travel; native snapping is restored on arrival/interruption.');
 
 // Boundary crossings preserve sub-row position, update the correct period,
 // and recycle a fixed-size DOM rather than adding rows each lap.
@@ -171,12 +184,13 @@ console.log('PASS: List loops seamlessly in both directions for 100 laps, preser
 for (const mobile of [false,true]) {
   const keyboard=createTable(852,27,false,mobile);
   keyboard.focus(56);
-  if (mobile) keyboard.advance();
-  else keyboard.manual(2*keyboard.cycleHeight);
+  // Native link focus scrolls the browser viewport; it no longer starts an
+  // application-owned selection animation on mobile.
+  keyboard.manual(2*keyboard.cycleHeight);
   assert.equal(keyboard.element.scrollTop,keyboard.cycleHeight);
   assert.equal(keyboard.activeEntry,28,'focus transfers to the identical recycled row without scrolling');
   assert.equal(keyboard.focusedEntry,28);
-  assert.equal(keyboard.commands,mobile?1:0,'recycling focus must not start another navigation animation');
+  assert.equal(keyboard.commands,0,'recycling link focus must not start a navigation animation');
   if(mobile) {assert.equal(keyboard.preview.week,0); assert.equal(keyboard.category,0);}
   for(let lap=0;lap<5;lap++) {
     keyboard.manual(2*keyboard.cycleHeight+12.25);

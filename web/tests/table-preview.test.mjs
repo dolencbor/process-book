@@ -25,7 +25,7 @@ function fixture(code, reduced=false) {
   const media={clientWidth:371,offsetParent:fixedHost};
   const context={
     document:{elementFromPoint:(x,y)=>({closest:()=>rows[Math.max(0,Math.min(83,Math.floor((y-281+scrollTop)/54.5)))]})},
-    React:{createElement:h}, motion:new Proxy({},{get:(_,tag)=>'motion.'+tag}),
+    React:{createElement:h}, Link:'a', motion:new Proxy({},{get:(_,tag)=>'motion.'+tag}),
     AnimatePresence:'presence',TablePeriodHeading:'heading',WeekNumber:'number',PreviewImage:'image',
     useIsPresent:()=>true,useReducedMotion:()=>reduced,useMobileLayout:()=>false,
     requestAnimationFrame:fn=>{frames.set(++frameId,fn);return frameId;},cancelAnimationFrame:id=>frames.delete(id),

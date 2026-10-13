@@ -1,0 +1,17 @@
+.page { width: 100%; max-width: 944px; margin: 0 auto; padding: 24px 24px 80px; color: #0a0a0a; font-family: var(--font-suisse-intl-book), Arial, Helvetica, sans-serif; letter-spacing: -0.02em; }
+.heading { margin: 72px 0 40px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 20px; font-size: 14px; line-height: 1.2; font-feature-settings: "lnum" 1, "tnum" 1; }
+.category, .date { color: #808080; }
+.heading h1 { max-width: 900px; font-size: clamp(36px, 6vw, 72px); line-height: 1; letter-spacing: -0.05em; }
+.date { display: block; margin-top: 24px; font-size: 14px; line-height: 1.2; }
+.coverFrame { margin: 0 0 48px; }
+.cover { position: relative; overflow: hidden; --corner-radius: 24px; border-radius: var(--corner-radius); background: #f6f6f6; }
+.cover[style*="--smooth-path"] { border-radius: 0; clip-path: var(--smooth-path); }
+.cover img { display: block; width: 100%; height: auto; }
+.body { max-width: 720px; font-size: 18px; letter-spacing: -0.02em; }
+@media (max-width: 700px) {
+  .page { padding: 16px 16px 48px; }
+  .heading { margin: 48px 0 28px; }
+  .coverFrame { margin-bottom: 32px; }
+  .body { font-size: 16px; }
+}

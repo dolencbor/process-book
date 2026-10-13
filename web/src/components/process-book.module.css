@@ -14,14 +14,15 @@
   letter-spacing: -0.02em;
   font-feature-settings: normal;
 }
-.app button { font: inherit; font-feature-settings: inherit; cursor: pointer; text-align: left; }
+.app button, .app a { font: inherit; font-feature-settings: inherit; cursor: pointer; text-align: left; }
+.app a { color: inherit; text-decoration: none; }
 /* Per-element OpenType profiles audited from the three Figma sections. */
 .owner > span, .categoryName, .year { font-feature-settings: "case" 1, "calt" 0, "lnum" 1, "tnum" 1; }
 .bookTitle { font-feature-settings: "calt" 0; }
 .range, .viewToggle button { font-feature-settings: "calt" 0, "lnum" 1, "tnum" 1; }
 .selectedWeek, .selectedTitle, .tableRow { font-feature-settings: "lnum" 1, "tnum" 1; }
 .exploreCursor, .touchExplore { font-feature-settings: "ordn" 1, "calt" 0, "lnum" 1, "tnum" 1; }
-.app button:focus-visible { outline: 2px solid #006bff; outline-offset: 2px; }
+.app button:focus-visible, .app a:focus-visible { outline: 2px solid #006bff; outline-offset: 2px; }
 .header { position: absolute; z-index: 5; top: 8px; left: 8px; right: 8px; display: flex; height: 32px; }
 .identity { position: relative; display: flex; align-items: center; justify-content: space-between; min-width: 0; flex: 1; height: 32px; padding: 4px 12px 4px 4px; --corner-stroke-opacity: 0.5; --corner-stroke: rgb(255 255 255 / var(--corner-stroke-opacity)); border: 1px solid var(--corner-stroke); --corner-radius: 10px; border-radius: var(--corner-radius); background: rgb(235 235 235 / 90%); backdrop-filter: blur(8px); }
 .owner { display: flex; gap: 10px; align-items: center; white-space: nowrap; }
@@ -188,7 +189,7 @@
   pointer-events: none;
   background: var(--smooth-border) 0 0 / 100% 100% no-repeat;
 }
-.app button[data-smooth-corners]:not([data-smooth-surface]):focus-visible::after {
+.app :is(button, a)[data-smooth-corners]:not([data-smooth-surface]):focus-visible::after {
   background-image: var(--smooth-focus);
 }
 

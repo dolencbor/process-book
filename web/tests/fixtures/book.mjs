@@ -1,6 +1,6 @@
 // The original prototype data belongs only in regression fixtures now.
 export const weeks = Array.from({ length: 28 }, (_, index) => ({
-  id: `fixture-${index}`, number: String(index + 1).padStart(2, "0"),
+  id: `fixture-${index}`, href: `/weeks/fixture-${index}`, number: String(index + 1).padStart(2, "0"),
   title: "I don’t treat branding", period: Math.floor(index / 7),
   image: null, imageAlt: `Week ${index + 1}`,
 }));

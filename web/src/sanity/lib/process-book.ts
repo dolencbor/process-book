@@ -9,7 +9,7 @@ export const periodDefinitions = [
 ] as const;
 
 export type ProcessWeek = {
-  id: string; number: string; title: string; period: number;
+  id: string; href: string; number: string; title: string; period: number;
   image: string | null; imageAlt: string;
 };
 export type ProcessPeriod = {
@@ -27,6 +27,7 @@ export function createProcessBookContent(data: PROCESS_BOOK_QUERY_RESULT): Proce
   }).sort((a, b) => a.period - b.period || a.entry.weekNumber! - b.entry.weekNumber! || a.entry._id.localeCompare(b.entry._id));
   const weeks = entries.map(({ entry, period }): ProcessWeek => ({
     id: entry._id,
+    href: `/weeks/${encodeURIComponent(entry._id)}`,
     number: String(entry.weekNumber).padStart(2, "0"),
     title: entry.title?.trim() || "Untitled week",
     period,

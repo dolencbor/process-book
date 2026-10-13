@@ -30,6 +30,21 @@ website without an application rebuild. Drafts stay private. An empty dataset
 shows an empty state; a category without posts is disabled. Text/image edits keep
 the current position; changing membership/order safely resets the scrolling loops.
 
+Each Scroll card and its corresponding List row are links to the same
+`/weeks/[postId]` page on desktop and mobile. The URL uses the stable CMS post ID,
+so editing its title or week number keeps shared links valid. The reader displays
+the published post title, category, date, cover and rich-text notes/images; unknown
+or unpublished IDs return 404. Mobile row focus updates the preview without
+starting a separate selection/scroll animation before navigation.
+
+The homepage has no loading fallback on browser Back. The shared layout remembers
+the selected view, period and week while visiting a post; List also restores its
+exact scroll position. Session storage preserves that position through a refresh
+of the post page. In production, the current Scroll card prefetches its full week
+route; List rows prefetch only after hover, focus or touch intent. Week content
+shared by the page and metadata is fetched once per server render through React's
+request cache.
+
 The older `/projects/[slug]` pages and their original schemas remain available
 for existing project content; they do not supply the homepage's weekly posts.
 

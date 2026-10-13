@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Suspense } from "react";
+import { ProcessBookHistoryProvider } from "@/components/process-book-history";
 import { SanityLive } from "@/sanity/lib/live";
 import "./globals.css";
 
@@ -54,7 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${suisseIntlBook.variable} ${suisseIntlRegular.variable} ${suisseIntlMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
+        <ProcessBookHistoryProvider>{children}</ProcessBookHistoryProvider>
         <Suspense fallback={null}><SanityLive /></Suspense>
       </body>
     </html>

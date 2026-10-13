@@ -3,6 +3,7 @@
 import { animate, AnimatePresence, motion, MotionConfig, useIsPresent, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, useTransform, type HTMLMotionProps, type MotionValue, type Transition } from "motion/react";
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { preload } from "react-dom";
 import styles from "./process-book.module.css";
 import { useSmoothCorners } from "./use-smooth-corners";
@@ -10,7 +11,10 @@ import { useTabWidths } from "./use-tab-widths";
 import { useMobileLayout } from "./use-mobile-layout";
 import { SwitcherSurface, switcherClip } from "./switcher-surface";
 import { ProcessBookProvider, useProcessBookContent } from "./process-book-content";
+import { resolveBookPosition, saveBookPosition, useProcessBookHistory, type ListLocation } from "./process-book-history";
 import type { ProcessBookContent } from "@/sanity/lib/process-book";
+
+const MotionLink = motion.create(Link);
 
 const interfaceTransition = { type: "tween", duration: 0.68, ease: [0.22, 1, 0.36, 1] } satisfies Transition;
 // Tab controls always use finite tweens: no inherited spring or momentum.
@@ -40,20 +44,20 @@ function screenReveal(reducedMotion: boolean | null, offset: number | string, en
 
 const screenStates = { enter: {}, visible: {}, exit: {} };
 
-function ScreenPanel({ left, label, children }: { left: string; label: string; children: ReactNode }) {
+function ScreenPanel({ left, label, startVisible, children }: { left: string; label: string; startVisible?: boolean; children: ReactNode }) {
   const present = useIsPresent();
   return <motion.section className={styles.screenPanel} style={{ left }} aria-label={label}
-    aria-hidden={!present} inert={!present} variants={screenStates} initial="enter" animate="visible" exit="exit">
+    aria-hidden={!present} inert={!present} variants={screenStates} initial={startVisible ? false : "enter"} animate="visible" exit="exit">
     {children}
   </motion.section>;
 }
 
-const ViewSwitcher = memo(function ViewSwitcher({ view, onViewChange }: { view: "scroll" | "table"; onViewChange: (view: "scroll" | "table") => void }) {
+const ViewSwitcher = memo(function ViewSwitcher({ view, onViewChange, startVisible }: { view: "scroll" | "table"; onViewChange: (view: "scroll" | "table") => void; startVisible?: boolean }) {
   const present = useIsPresent();
   const reducedMotion = useReducedMotion();
   return <motion.div className={styles.viewToggle} data-smooth-corners="0.6" data-smooth-surface style={{ clipPath: switcherClip }} role="group" aria-label="View mode"
     aria-hidden={!present} inert={!present} variants={screenReveal(reducedMotion, 16, revealStep * 3)}
-    initial="enter" animate="visible" exit="exit">
+    initial={startVisible ? false : "enter"} animate="visible" exit="exit">
     <SwitcherSurface className={styles.switcherSurface} />
     {/* Translate one persistent handle directly between its two endpoints.
         Avoid layout projection and spring settling on interrupted changes. */}
@@ -242,30 +246,33 @@ const TablePeriodHeading = memo(function TablePeriodHeading({ period, reducedMot
 
 // Only the previous and next hovered rows change; the other rows retain their
 // buttons, image-independent markup, and handlers during preview animations.
-const TableRow = memo(function TableRow({ index, entryIndex, preview, mobile, onSelect, onFocus, onBlur }: {
-  index: number; entryIndex: number; preview: boolean; mobile: boolean;
-  onSelect: (week: number) => void; onFocus: (week: number) => void; onBlur: () => void;
+const TableRow = memo(function TableRow({ index, entryIndex, preview, onFocus, onBlur }: {
+  index: number; entryIndex: number; preview: boolean;
+  onFocus: (week: number) => void; onBlur: () => void;
 }) {
   const { weeks } = useProcessBookContent();
   const entry = weeks[index];
+  const [prefetch, setPrefetch] = useState(false);
   return <div role="row" className={styles.tableRow} data-table-week={index} data-table-entry={entryIndex} data-preview={preview}>
     <span role="cell" className={styles.tableWeek}><span className={styles.number}>{entry.number}</span></span>
-    <span role="cell"><button className={styles.rowButton}
-      onFocus={() => onFocus(entryIndex)} onBlur={onBlur}
-      onClick={() => onSelect(entryIndex)} aria-label={`${mobile ? "Select" : "Explore"} week ${entry.number}: ${entry.title}`}>
+    <span role="cell"><Link href={entry.href} prefetch={prefetch} className={styles.rowButton}
+      onMouseEnter={() => setPrefetch(true)} onTouchStart={() => setPrefetch(true)}
+      onFocus={() => { setPrefetch(true); onFocus(entryIndex); }} onBlur={onBlur}
+      aria-label={`Explore week ${entry.number}: ${entry.title}`}>
       <span>{entry.title}</span>
-    </button></span>
+    </Link></span>
   </div>;
 });
 
 // Tutorial 030: one persistent image mask, fixed horizontally, following Y.
-const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVersion, onWeekSelect, onWeekChange, onPeriodChange, active: enabled }: {
+const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVersion, initialListLocation, onWeekChange, onPeriodChange, onNavigate, active: enabled }: {
   category: number;
   jumpWeek: number;
   jumpVersion: number;
-  onWeekSelect: (week: number) => void;
+  initialListLocation: { week: number; offset: number } | null;
   onWeekChange: (week: number) => void;
   onPeriodChange: (period: number) => void;
+  onNavigate: (week: number, location: ListLocation) => void;
   active: boolean;
 }) {
   const active = useIsPresent() && enabled;
@@ -334,7 +341,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       const nextRow = rows[focused.current];
       if (oldRow?.contains(document.activeElement) && nextRow) {
         recyclingFocus.current = true;
-        nextRow.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+        nextRow.querySelector<HTMLAnchorElement>("a[href]")?.focus({ preventScroll: true });
         recyclingFocus.current = false;
       }
     }
@@ -471,15 +478,19 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const index = previousJump.current === jumpVersion && indicated.current.week >= 0 ? indicated.current.week : jumpWeek;
     previousJump.current = jumpVersion;
     indicated.current.period = -1;
+    if (firstPlacement && initialListLocation && viewport.current) {
+      const row = rowGeometry.current.rows[weeks.length + initialListLocation.week];
+      if (row) {
+        viewport.current.scrollTop = row.offsetTop + row.offsetHeight * initialListLocation.offset;
+        writtenTop.current = viewport.current.scrollTop;
+        indicated.current.week = initialListLocation.week;
+        indicated.current.period = periodForWeek(initialListLocation.week);
+        if (mobile) show(weeks.length + initialListLocation.week);
+        return;
+      }
+    }
     return goToWeek(index, firstPlacement);
-  }, [jumpWeek, jumpVersion, goToWeek, copies]);
-
-  const selectRow = useCallback((entry: number) => {
-    const index = entry % weeks.length;
-    if (!mobile) { onWeekSelect(index); return; }
-    onPeriodChange(periodForWeek(index));
-    goToWeek(index, false, entry);
-  }, [mobile, onWeekSelect, onPeriodChange, goToWeek, periodForWeek, weeks.length]);
+  }, [jumpWeek, jumpVersion, initialListLocation, goToWeek, copies, mobile, periodForWeek, show, weeks.length]);
 
   const trackPointer = useCallback(() => {
     if (mobile) return;
@@ -492,10 +503,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const focusWeek = useCallback((entry: number) => {
     focused.current = entry;
     if (recyclingFocus.current) return;
-    const index = entry % weeks.length;
-    if (mobile) { onPeriodChange(periodForWeek(index)); goToWeek(index, false, entry); }
-    else show(entry);
-  }, [mobile, onPeriodChange, goToWeek, show, periodForWeek, weeks.length]);
+    // A row is a navigation link. Focus can update its preview, but must not
+    // start scroll travel that moves the link during a tap/click.
+    show(entry);
+  }, [show]);
   const blurWeek = useCallback(() => { focused.current = null; trackPointer(); }, [trackPointer]);
 
   const schedulePointer = (scrolled = false, index?: number) => {
@@ -521,6 +532,20 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   };
   const handleScroll = () => schedulePointer(true);
 
+  const captureListPosition = () => {
+    const scroll = viewport.current;
+    const { rows, ends, ready } = rowGeometry.current;
+    if (!scroll || !ready) return;
+    const entry = ends.findIndex(end => end > scroll.scrollTop + 0.5);
+    const row = rows[entry < 0 ? rows.length - 1 : entry];
+    if (!row) return;
+    const week = Number(row.dataset.tableWeek);
+    onNavigate(week, {
+      weekId: weeks[week].id,
+      offset: Math.max(0, Math.min(1, (scroll.scrollTop - row.offsetTop) / row.offsetHeight)),
+    });
+  };
+
   return <div className={styles.tableView}>
     <div className={styles.tableCanvas}>
     <motion.div className={styles.tableHeader} variants={screenReveal(reducedMotion, 32, revealStep)}>
@@ -535,7 +560,9 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       <div ref={table} className={styles.weekTable}>
         <div role="table" aria-label="All school weeks">
           <div role="row" className={styles.srOnly}><span role="columnheader">Week</span><span role="columnheader">Title</span></div>
-          <div role="rowgroup" onPointerLeave={() => { pointer.current = null; show(focused.current); }}
+          <div role="rowgroup" onClickCapture={event => {
+            if ((event.target as Element).closest("a[href]")) captureListPosition();
+          }} onPointerLeave={() => { pointer.current = null; show(focused.current); }}
             onPointerMove={event => {
               if (mobile || event.pointerType !== "mouse") return;
               pointer.current = { x: event.clientX, y: event.clientY };
@@ -543,8 +570,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
               schedulePointer(false, row ? Number(row.dataset.tableEntry) : undefined);
             }}>
             {Array.from({ length: copies * weeks.length }, (_, entry) => <TableRow key={entry}
-              index={entry % weeks.length} entryIndex={entry} mobile={mobile}
-              preview={preview.visible && preview.week === entry % weeks.length} onSelect={selectRow}
+              index={entry % weeks.length} entryIndex={entry}
+              preview={preview.visible && preview.week === entry % weeks.length}
               onFocus={focusWeek} onBlur={blurWeek} />)}
           </div>
         </div>
@@ -578,7 +605,7 @@ const maskedText = {
   visible: { y: "0%" },
   exit: (direction: number) => ({ y: `${direction * -110}%` }),
 };
-type CardPointerHandlers = Pick<HTMLMotionProps<"button">, "onPointerEnter" | "onPointerMove" | "onPointerLeave" | "onPointerDown" | "onPointerUp" | "onPointerCancel">;
+type CardPointerHandlers = Pick<HTMLMotionProps<"a">, "onPointerEnter" | "onPointerMove" | "onPointerLeave" | "onPointerDown" | "onPointerUp" | "onPointerCancel">;
 
 const wrapWeek = (value: number, count: number) => ((value % count) + count) % count;
 const railOffset = (entry: number, progress: number, count: number) => wrapWeek(entry - progress + count / 2, count) - count / 2;
@@ -600,7 +627,7 @@ function railScreenReveal(reducedMotion: boolean | null) {
   };
 }
 
-const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, gap = 8, slot, reducedMotion, cardPointerHandlers, cursorActive }: {
+const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, gap = 8, slot, reducedMotion, cardPointerHandlers, cursorActive, onNavigate }: {
   entry: number;
   position: MotionValue<number>;
   arrival: MotionValue<number>;
@@ -610,6 +637,7 @@ const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, ga
   reducedMotion: boolean | null;
   cardPointerHandlers: CardPointerHandlers;
   cursorActive: boolean;
+  onNavigate: (week: number) => void;
 }) {
   const { weeks } = useProcessBookContent();
   const center = slot === 0;
@@ -636,15 +664,16 @@ const RailCard = memo(function RailCard({ entry, position, arrival, cardSize, ga
   // opacity, so wheel, touch, keyboard, and endless recycling keep their feel.
   const opacity = useTransform(() => Math.min(edgeOpacity.get(), restingOpacity.get()));
 
-  return <motion.button className={`${styles.stackCard} ${center ? styles.mainCard : Math.abs(slot) === 1 ? styles.near : styles.far}`}
+  return <MotionLink href={weeks[entry].href} prefetch={center} className={`${styles.stackCard} ${center ? styles.mainCard : Math.abs(slot) === 1 ? styles.near : styles.far}`}
     data-smooth-corners={center ? "0.6" : "0"} data-center={center} data-week={entry + 1}
     data-cursor-active={center && cursorActive} aria-hidden={!center} tabIndex={center ? 0 : -1}
     aria-label={center ? `Explore week ${weeks[entry].number}: ${weeks[entry].title}` : undefined}
+    onClick={center ? () => onNavigate(entry) : undefined}
     style={{ top: 0, left: 0, x: left, y: top, width, height, opacity }} whileTap={center && !reducedMotion ? { scale: 0.98 } : undefined}
     {...(center ? cardPointerHandlers : {})}>
     <span className={styles.railMedia}><PreviewImage week={entry} /></span>
     {center ? <span className={styles.touchExplore}>Explore →</span> : null}
-  </motion.button>;
+  </MotionLink>;
 });
 
 function WeekNumber({ number, direction, reducedMotion }: { number: string; direction: number; reducedMotion: boolean | null }) {
@@ -659,14 +688,16 @@ function WeekNumber({ number, direction, reducedMotion }: { number: string; dire
   </span>;
 }
 
-const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersion, onWeekChange, onPeriodChange, cardPointerHandlers, cursorActive, active: enabled }: {
+const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersion, onWeekChange, onPeriodChange, onNavigate, cardPointerHandlers, cursorActive, startVisible, active: enabled }: {
   week: number;
   jumpWeek: number;
   jumpVersion: number;
   onWeekChange: (week: number) => void;
   onPeriodChange: (period: number) => void;
+  onNavigate: (week: number) => void;
   cardPointerHandlers: CardPointerHandlers;
   cursorActive: boolean;
+  startVisible: boolean;
   active: boolean;
 }) {
   const { weeks, periodForWeek } = useProcessBookContent();
@@ -691,7 +722,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
   const [cardSize, setCardSize] = useState(0);
   const mobile = useMobileLayout();
   const reducedMotion = useReducedMotion();
-  const arrival = useMotionValue(reducedMotion ? 0 : railRevealDistance);
+  const arrival = useMotionValue(reducedMotion || startVisible ? 0 : railRevealDistance);
 
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -908,7 +939,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
         <motion.div ref={stack} className={styles.stack} style={{ "--rail-arrival": arrival } as HTMLMotionProps<"div">["style"]}
           variants={railScreenReveal(reducedMotion)}>
           {cardSize > 0 ? visibleRailEntries(week, weeks.length).map(index => <RailCard key={weeks[index].id} entry={index} position={position} arrival={arrival} cardSize={cardSize} gap={mobile ? 6 : 8}
-            slot={railOffset(index, week, weeks.length)} reducedMotion={reducedMotion} cardPointerHandlers={cardPointerHandlers} cursorActive={index === week && cursorActive} />) : null}
+            slot={railOffset(index, week, weeks.length)} reducedMotion={reducedMotion} cardPointerHandlers={cardPointerHandlers} cursorActive={index === week && cursorActive} onNavigate={onNavigate} />) : null}
           <span className={styles.topFade} aria-hidden /><span className={styles.bottomFade} aria-hidden />
         </motion.div>
         <p className={`${styles.selectedTitle} ${styles.screenTextMask}`} aria-label={weeks[week].title}>
@@ -981,13 +1012,16 @@ function EmptyProcessBook() {
 }
 
 function ProcessBookApp() {
-  const { weeks, firstWeekInPeriod, periodForWeek } = useProcessBookContent();
+  const { weeks, firstWeekInPeriod } = useProcessBookContent();
+  const { position: storedPosition, setPosition } = useProcessBookHistory();
+  const [initial] = useState(() => resolveBookPosition(storedPosition, weeks));
+  const [returning, setReturning] = useState(initial.restored);
   if (weeks[0].image) preload(weeks[0].image, { as: "image", fetchPriority: "high" });
   const smoothRoot = useSmoothCorners();
-  const [selected, setSelected] = useState(weeks[0].period);
-  const [view, setView] = useState<"scroll" | "table">("scroll");
-  const [week, setWeek] = useState(0);
-  const [jumpWeek, setJumpWeek] = useState(0);
+  const [selected, setSelected] = useState(initial.selected);
+  const [view, setView] = useState<"scroll" | "table">(initial.view);
+  const [week, setWeek] = useState(initial.week);
+  const [jumpWeek, setJumpWeek] = useState(initial.week);
   const [jumpVersion, setJumpVersion] = useState(0);
   const [cursor, setCursor] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -1004,7 +1038,7 @@ function ProcessBookApp() {
     setCursor(false);
     setPressed(false);
   }, []);
-  const trackCursor = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+  const trackCursor = useCallback((event: PointerEvent<HTMLAnchorElement>) => {
     const inside = event.pointerType === "mouse";
     if (inside) {
       const nextX = event.clientX;
@@ -1027,15 +1061,20 @@ function ProcessBookApp() {
     onPointerCancel: clearCursor,
   }), [trackCursor, clearCursor]);
   const changeWeek = useCallback((next: number) => { setWeek(next); clearCursor(); }, [clearCursor]);
-  const exploreWeek = useCallback((index: number) => {
-    setWeek(index); setSelected(periodForWeek(index)); setView("scroll"); clearCursor();
-  }, [clearCursor, periodForWeek]);
   const navigationState = useRef({ view, week });
   useLayoutEffect(() => { navigationState.current = { view, week }; }, [view, week]);
+  useLayoutEffect(() => {
+    setPosition(current => ({ view, weekId: weeks[week].id, selected, list: current?.list ?? null }));
+  }, [setPosition, selected, view, week, weeks]);
+  const saveBeforeNavigate = useCallback((index: number, list?: ListLocation) => {
+    const snapshot = { view, weekId: weeks[index].id, selected, list: list ?? storedPosition?.list ?? null };
+    setPosition(snapshot);
+    saveBookPosition(snapshot);
+  }, [selected, setPosition, storedPosition?.list, view, weeks]);
   const changeView = useCallback((mode: "scroll" | "table") => {
     if (mode === navigationState.current.view) return;
     if (mode === "table") { setJumpWeek(navigationState.current.week); setJumpVersion(version => version + 1); }
-    setView(mode); clearCursor();
+    setReturning(false); setView(mode); clearCursor();
   }, [clearCursor]);
 
   const select = useCallback((index: number) => {
@@ -1066,19 +1105,19 @@ function ProcessBookApp() {
 
         <div className={styles.content}>
           <motion.div className={styles.screenField} initial={false} animate={{ x: `${screen * -100}%` }} transition={reducedMotion ? { duration: 0 } : screenTransition}>
-          <AnimatePresence mode="sync" initial={!reducedMotion}>
-          {view === "scroll" ? <ScreenPanel key="scroll" left="0%" label="All school weeks, scroll view">
-              <WeekScrollView active week={week} jumpWeek={jumpWeek} jumpVersion={jumpVersion} onWeekChange={changeWeek} onPeriodChange={setSelected} cursorActive={cursor} cardPointerHandlers={cardPointerHandlers} />
+          <AnimatePresence mode="sync" initial={!reducedMotion && !returning}>
+          {view === "scroll" ? <ScreenPanel key="scroll" left="0%" label="All school weeks, scroll view" startVisible={returning}>
+              <WeekScrollView active week={week} jumpWeek={jumpWeek} jumpVersion={jumpVersion} onWeekChange={changeWeek} onPeriodChange={setSelected} onNavigate={saveBeforeNavigate} cursorActive={cursor} cardPointerHandlers={cardPointerHandlers} startVisible={returning} />
           </ScreenPanel> : null}
-          {view === "table" ? <ScreenPanel key="table" left="100%" label="All school weeks, list view">
+          {view === "table" ? <ScreenPanel key="table" left="100%" label="All school weeks, list view" startVisible={returning}>
               <WeekTableView active category={selected} jumpWeek={jumpWeek} jumpVersion={jumpVersion}
-                onWeekChange={setWeek}
-                onPeriodChange={setSelected}
-                onWeekSelect={exploreWeek} />
+                initialListLocation={initial.view === "table" && jumpVersion === 0 ? initial.list : null}
+                onWeekChange={setWeek} onNavigate={saveBeforeNavigate}
+                onPeriodChange={setSelected} />
           </ScreenPanel> : null}
           </AnimatePresence>
           </motion.div>
-          <ViewSwitcher key="view-switcher" view={view} onViewChange={changeView} />
+          <ViewSwitcher key="view-switcher" view={view} onViewChange={changeView} startVisible={returning} />
         </div>
         <ExploreCursor cursor={cursor} pressed={pressed} reducedMotion={reducedMotion}
           cursorX={cursorX} cursorY={cursorY} x={x} y={y} />

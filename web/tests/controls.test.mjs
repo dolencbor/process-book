@@ -18,11 +18,11 @@ function hooks() {
     return state.value;
   };
   return {
-    values, reset: () => { index = 0; }, commit: () => effects.splice(0).forEach(fn => fn()),
+    values, reset: () => { index = 0; }, clear: () => { values.length = 0; effects.length = 0; index = 0; }, commit: () => effects.splice(0).forEach(fn => fn()),
     api: {
       useRef: value => hook(() => ({ current: value })),
       useState: value => {
-        const state = hook(() => ({ value }));
+        const state = hook(() => ({ value: typeof value === "function" ? value() : value }));
         state.set ??= next => { state.value = typeof next === "function" ? next(state.value) : next; };
         return [state.value, state.set];
       },
@@ -39,17 +39,22 @@ function hooks() {
   };
 }
 const appHooks = hooks();
+const history = { position: null, setPosition(next) { history.position = typeof next === "function" ? next(history.position) : next; } };
 const appStart = source.indexOf("function ProcessBookApp()");
 const appEnd = source.indexOf("\n  return (", appStart);
 const appContext = {
   ...appHooks.api, useProcessBookContent:()=>book, preload() {}, useSmoothCorners: () => ({}),
+  useProcessBookHistory: () => history,
+  resolveBookPosition: saved => saved ? { view: saved.view, week: book.weeks.findIndex(week => week.id === saved.weekId), selected: saved.selected, list: null, restored: true }
+    : { view: "scroll", week: 0, selected: 0, list: null, restored: false },
+  saveBookPosition() {},
   firstWeekInPeriod: period => period * 7, periodForWeek: week => Math.floor(week / 7),
   exploreCursorSpring: {}, window: { addEventListener() {}, removeEventListener() {} },
 };
 appContext.useEffect = appContext.useLayoutEffect;
 vm.createContext(appContext);
 vm.runInContext(ts.transpile(source.slice(appStart, appEnd).replace("export function", "function") +
-  "return { select, changeView, changeWeek, exploreWeek, trackCursor, cardPointerHandlers, reset, view, week, selected, jumpWeek, jumpVersion };\n}",
+  "return { select, changeView, changeWeek, trackCursor, cardPointerHandlers, reset, view, week, selected, jumpWeek, jumpVersion };\n}",
 { target: ts.ScriptTarget.ES2022 }), appContext);
 const render = () => { appHooks.reset(); const result = appContext.ProcessBookApp(); appHooks.commit(); return result; };
 let app = render();
@@ -66,11 +71,14 @@ assert.equal(app.selected, 1); assert.equal(app.jumpWeek, 7); assert.equal(app.w
 assert.equal(app.view, "table", "a period click has the same command semantics in both views");
 app.changeWeek(9); app = render();
 assert.equal(app.selected, 1, "intermediate week updates cannot override clicked selection");
-app.exploreWeek(15); app = render();
-assert.equal(app.week, 15); assert.equal(app.selected, 2); assert.equal(app.view, "scroll");
+appHooks.clear(); app = render();
+assert.equal(app.view, "table", "browser Back restores the active view");
+assert.equal(app.week, 9, "browser Back restores the visible week");
+assert.equal(app.selected, 1, "browser Back restores the selected period");
+const restoredSelect = app.select, restoredChangeView = app.changeView, restoredHandlers = app.cardPointerHandlers;
 app.reset(); app = render();
 assert.equal(app.week, 0); assert.equal(app.selected, 0); assert.equal(app.view, "scroll");
-assert.equal(app.select, select); assert.equal(app.changeView, changeView); assert.equal(app.cardPointerHandlers, handlers);
+assert.equal(app.select, restoredSelect); assert.equal(app.changeView, restoredChangeView); assert.equal(app.cardPointerHandlers, restoredHandlers);
 
 const tabHooks = hooks();
 let resize;

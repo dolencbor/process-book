@@ -38,6 +38,7 @@ assert.deepEqual(Array.from(result.weeks, week => week.id), ["week-a", "week-b",
 assert.deepEqual(Array.from(result.periods, period => period.firstIndex), [0, 2, null, 3], "tab destinations follow actual category membership, without seven-week arithmetic");
 assert.deepEqual(Array.from(result.periods, period => period.range), ["Week 1-3", "Week 8-8", "No weeks", "Week 22-22"]);
 assert.equal(result.weeks[2].period, 1);
+assert.equal(result.weeks[2].href, "/weeks/week-c", "the post ID supplies one stable destination for both views");
 assert.equal(result.weeks[2].title, "A CMS title");
 assert.equal(result.weeks[2].imageAlt, cover.alt);
 const url = new URL(result.weeks[0].image);

@@ -12,7 +12,7 @@ const context={useProcessBookContent:()=>book,weeks:Array.from({length:28}),useT
 }})};
 vm.createContext(context);
 const constants=source.slice(source.indexOf('const wrapWeek'),source.indexOf('\nfunction railScreenReveal'));
-const start=source.indexOf('function RailCard('),end=source.indexOf('  return <motion.button',start);
+const start=source.indexOf('function RailCard('),end=source.indexOf('  return <MotionLink',start);
 vm.runInContext(ts.transpile(constants+'\n'+source.slice(start,end)+'return { top, left, width, height, opacity };\n}\nglobalThis.entries=visibleRailEntries;', {target:ts.ScriptTarget.ES2022}),context);
 let samples=0;
 for(const reducedMotion of [false,true])for(let progress=-28;progress<56;progress+=.125){

@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 // sizing helper. The previous regression passed sizing tests but rendered
 // buttons with flex-grow:0 and no flex-basis, collapsing them to 32px.
 const require = createRequire(import.meta.url);
-const source = fs.readFileSync("src/components/process-book.tsx", "utf8") + "\nexport { CategoryTabs as TestCategoryTabs, ViewSwitcher as TestViewSwitcher, PreviewImage as TestPreviewImage, TableRow as TestTableRow, TablePeriodHeading as TestHeading, getTabSizes, getTabWidths };";
+const source = fs.readFileSync("src/components/process-book.tsx", "utf8") + "\nexport { CategoryTabs as TestCategoryTabs, ViewSwitcher as TestViewSwitcher, PreviewImage as TestPreviewImage, RailCard as TestRailCard, TableRow as TestTableRow, TablePeriodHeading as TestHeading, getTabSizes, getTabWidths };";
 const compiledModule = { exports: {} };
 const captured = [];
 let measured = false;
@@ -57,6 +57,7 @@ const context = {
     } };
     if (name.endsWith(".module.css")) return { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) };
     if (name === "./use-smooth-corners") return { useSmoothCorners: () => React.useRef(null) };
+    if (name === "./process-book-history") return {};
     return require(name);
   },
 };
@@ -180,3 +181,16 @@ const cmsTabs = renderToStaticMarkup(React.createElement(compiledModule.exports.
 assert.match(cmsTabs, /CMS period title/);
 assert.match(cmsTabs, /Week 3-11/);
 console.log("PASS: actual React components render the CMS post title/image/alt and category heading/range in cards, List rows and tabs.");
+
+const card = renderToStaticMarkup(React.createElement(compiledModule.exports.TestRailCard, {
+  entry: 0, position: actualMotion.motionValue(0), arrival: actualMotion.motionValue(0), cardSize: 318,
+  slot: 0, reducedMotion: false, cardPointerHandlers: {}, cursorActive: false,
+}));
+const rowHref=row.match(/<a\b[^>]*href="([^"]+)"/)[1], cardHref=card.match(/<a\b[^>]*href="([^"]+)"/)[1];
+assert.equal(cardHref,currentContent.weeks[0].href);
+assert.equal(rowHref,cardHref,"the card and List row open exactly the same post URL");
+assert.match(card,/<a\b/); assert.match(row,/<a\b/);
+assert(!row.includes("<button"),"List rows use native navigation links");
+const mobileRow = renderToStaticMarkup(React.createElement(compiledModule.exports.TestTableRow, { index: 0, entryIndex: 28, preview: false, mobile: true, onFocus() {}, onBlur() {} }));
+assert.equal(mobileRow.match(/<a\b[^>]*href="([^"]+)"/)[1],cardHref,"mobile and recycled copies preserve the same destination");
+console.log("PASS: Scroll cards, desktop/mobile List rows and recycled rows are native links to the same CMS week page.");
