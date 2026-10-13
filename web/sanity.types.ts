@@ -113,6 +113,75 @@ export type Slug = {
   source?: string;
 };
 
+export type CategoryReference = {
+  _ref: string;
+  _type: "reference";
+  _weak?: boolean;
+  [internalGroqTypeReferenceTo]?: "category";
+};
+
+export type Post = {
+  _id: string;
+  _type: "post";
+  _createdAt: string;
+  _updatedAt: string;
+  _rev: string;
+  title?: string;
+  weekNumber?: number;
+  category?: CategoryReference;
+  entryDate?: string;
+  coverImage?: {
+    asset?: SanityImageAssetReference;
+    media?: unknown;
+    hotspot?: SanityImageHotspot;
+    crop?: SanityImageCrop;
+    alt?: string;
+    _type: "image";
+  };
+  body?: Array<
+    | {
+        children?: Array<{
+          marks?: Array<string>;
+          text?: string;
+          _type: "span";
+          _key: string;
+        }>;
+        style?:
+          "normal" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote";
+        listItem?: "bullet" | "number";
+        markDefs?: Array<{
+          href?: string;
+          _type: "link";
+          _key: string;
+        }>;
+        level?: number;
+        _type: "block";
+        _key: string;
+      }
+    | {
+        asset?: SanityImageAssetReference;
+        media?: unknown;
+        hotspot?: SanityImageHotspot;
+        crop?: SanityImageCrop;
+        alt?: string;
+        caption?: string;
+        _type: "image";
+        _key: string;
+      }
+  >;
+};
+
+export type Category = {
+  _id: string;
+  _type: "category";
+  _createdAt: string;
+  _updatedAt: string;
+  _rev: string;
+  title?: string;
+  key?:
+    "foundation" | "playgrounds-one" | "personal-project" | "playgrounds-two";
+};
+
 export type SanityImagePaletteSwatch = {
   _type: "sanity.imagePaletteSwatch";
   background?: string;
@@ -218,6 +287,9 @@ export type AllSanitySchemaTypes =
   | SanityImageHotspot
   | Project
   | Slug
+  | CategoryReference
+  | Post
+  | Category
   | SanityImagePaletteSwatch
   | SanityImagePalette
   | SanityImageDimensions
@@ -226,6 +298,38 @@ export type AllSanitySchemaTypes =
   | SanityAssetSourceData
   | SanityImageAsset
   | Geopoint;
+
+// Source: ../web/src/sanity/lib/queries.ts
+// Variable: PROCESS_BOOK_QUERY
+// Query: {    "categories": *[_type == "category" && defined(key)]{_id, title, key},    "posts": *[_type == "post" && defined(weekNumber) && defined(category._ref)]      | order(weekNumber asc, _id asc) {        _id, title, weekNumber, "categoryId": category._ref,        "coverImage": coalesce(coverImage, body[_type == "image" && defined(asset)][0]) {          asset, crop, hotspot, alt        }      }  }
+export type PROCESS_BOOK_QUERY_RESULT = {
+  categories: Array<{
+    _id: string;
+    title: string | null;
+    key:
+      "foundation" | "personal-project" | "playgrounds-one" | "playgrounds-two";
+  }>;
+  posts: Array<{
+    _id: string;
+    title: string | null;
+    weekNumber: number;
+    categoryId: string;
+    coverImage:
+      | {
+          asset: SanityImageAssetReference;
+          crop: SanityImageCrop | null;
+          hotspot: SanityImageHotspot | null;
+          alt: string | null;
+        }
+      | {
+          asset: SanityImageAssetReference | null;
+          crop: SanityImageCrop | null;
+          hotspot: SanityImageHotspot | null;
+          alt: string | null;
+        }
+      | null;
+  }>;
+};
 
 // Source: ../web/src/sanity/lib/queries.ts
 // Variable: PROJECTS_QUERY
@@ -303,6 +407,7 @@ export type PROJECT_QUERY_RESULT = {
 // Query TypeMap
 declare global {
   interface SanityQueries {
+    '\n  {\n    "categories": *[_type == "category" && defined(key)]{_id, title, key},\n    "posts": *[_type == "post" && defined(weekNumber) && defined(category._ref)]\n      | order(weekNumber asc, _id asc) {\n        _id, title, weekNumber, "categoryId": category._ref,\n        "coverImage": coalesce(coverImage, body[_type == "image" && defined(asset)][0]) {\n          asset, crop, hotspot, alt\n        }\n      }\n  }\n': PROCESS_BOOK_QUERY_RESULT;
     '\n  *[_type == "project" && defined(slug.current)]\n  | order(startedAt desc, _createdAt desc) {\n    _id, title, "slug": slug.current, summary, coverImage,\n    "entryCount": count(*[_type == "processEntry" && project._ref == ^._id])\n  }\n': PROJECTS_QUERY_RESULT;
     '\n  *[_type == "project" && slug.current == $slug][0] {\n    _id, title, summary, coverImage, startedAt,\n    "entries": *[_type == "processEntry" && project._ref == ^._id]\n      | order(entryDate asc, _createdAt asc) {\n        _id, title, entryDate, body\n      }\n  }\n': PROJECT_QUERY_RESULT;
   }

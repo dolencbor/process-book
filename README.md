@@ -1,6 +1,6 @@
 # Process Book
 
-Design projects and their process entries, powered by Sanity and Next.js.
+Weekly school-year posts grouped into period categories, powered by Sanity and Next.js.
 
 ## Structure
 
@@ -27,8 +27,10 @@ npm run dev
 ```
 
 Open the website at http://localhost:3000 and the Studio at http://localhost:3333.
-Sign in to the Studio, publish a Project with a slug, then publish Process Entries
-referencing that Project. The website only displays published content.
+Sign in to the Studio, choose a Period Category, then create a Week Post with its
+week number, title, category, date, and card image. Publish the post to show it in
+both Scroll and List. The CMS contains four categories and 28 published mock posts
+based on the original frontend. Edit them at https://processbook.sanity.studio/.
 
 After schema or GROQ query changes, regenerate frontend types from `studio/`:
 

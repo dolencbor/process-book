@@ -1,5 +1,18 @@
 import { defineQuery } from "next-sanity";
 
+export const PROCESS_BOOK_QUERY = defineQuery(`
+  {
+    "categories": *[_type == "category" && defined(key)]{_id, title, key},
+    "posts": *[_type == "post" && defined(weekNumber) && defined(category._ref)]
+      | order(weekNumber asc, _id asc) {
+        _id, title, weekNumber, "categoryId": category._ref,
+        "coverImage": coalesce(coverImage, body[_type == "image" && defined(asset)][0]) {
+          asset, crop, hotspot, alt
+        }
+      }
+  }
+`);
+
 export const PROJECTS_QUERY = defineQuery(`
   *[_type == "project" && defined(slug.current)]
   | order(startedAt desc, _createdAt desc) {

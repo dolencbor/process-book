@@ -6,10 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:interactions": "node --test tests/*.test.mjs",
+    "assets:optimize": "node scripts/optimize-assets.mjs"
   },
   "dependencies": {
     "@sanity/image-url": "^2.1.1",
+    "figma-squircle": "^1.1.0",
+    "motion": "^14.1.0",
     "next": "16.3.8",
     "next-sanity": "^13.3.4",
     "react": "19.2.8",

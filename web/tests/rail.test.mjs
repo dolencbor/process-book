@@ -1,0 +1,116 @@
+import fs from "node:fs";
+import vm from "node:vm";
+import assert from "node:assert/strict";
+import ts from "typescript";
+import { motionValue, keyframes } from "motion";
+const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
+const start = source.indexOf('function WeekScrollView(');
+const end = source.indexOf('  return <div ref={viewport}', start);
+const component = source.slice(start, end) + '  return { interruptTravel, goTo, scroll };\n}';
+const navigationStart = source.indexOf('const tabNavigationTransition');
+const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
+const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
+function createRail(initialWeek = 0, reduced = false) {
+  const hooks = [], effects = [], subscriptions = [];
+  let index = 0, animation = null, commands = 0, props;
+  const seen = [], periods = [], resizeCallbacks = []; let selected = Math.floor(initialWeek / 7);
+  const element = { clientHeight: 900, scrollTop: 0, style: { setProperty() {} }, scrollTo({top}) { this.scrollTop = top; }, focus() {} };
+  const cards = { clientWidth: 530 };
+  const hook = make => { const i = index++; return hooks[i] ??= make(); };
+  const context = {
+    useIsPresent: () => true,
+    useRef: value => hook(() => ({ current: value })),
+    useState: value => { const entry = hook(() => ({value})); return [entry.value, next => {entry.value = next;}]; },
+    useReducedMotion: () => reduced,
+    useMobileLayout: () => false,
+    useMotionValue: value => hook(() => {
+      const m = motionValue(value);
+      const stop = m.stop.bind(m);
+      m.stop = () => { if (animation?.value === m) animation.stopped = true; stop(); };
+      return m;
+    }),
+    useLayoutEffect: (fn, deps) => {
+      const state = hook(() => ({ deps: null, cleanup: null }));
+      if (!state.deps || deps.some((v, i) => v !== state.deps[i])) effects.push(() => {
+        state.cleanup?.(); state.cleanup = fn(); state.deps = deps;
+      });
+    },
+    useMotionValueEvent: (value, event, callback) => { subscriptions.push(value.on(event, callback)); },
+    animate: (value, target, options) => {
+      commands++;
+      animation = { value, target, options, stopped: false, time: 0,
+        generator: keyframes({ keyframes: [value.get(), target], duration: options.duration * 1000, ease: options.ease }) };
+    },
+    weeks: Array.from({length: 28}),
+    wrapWeek: n => ((n % 28) + 28) % 28,
+    periodForWeek: n => Math.floor(n / 7),
+    railRevealDistance: 4,
+    interfaceTransition: { type: 'tween', duration: .68, ease: [.22, 1, .36, 1] },
+    railSpring: {}, railSnapSpring: {},
+    ResizeObserver: class { constructor(callback) { resizeCallbacks.push(callback); } observe() {} disconnect() {} }, setTimeout, clearTimeout,
+  };
+  context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
+  vm.createContext(context); vm.runInContext(js, context);
+  const render = () => {
+    subscriptions.splice(0).forEach(fn => fn()); index = 0;
+    const handlers = context.WeekScrollView(props);
+    hooks[0].current = element; hooks[1].current = cards;
+    effects.splice(0).forEach(fn => fn());
+    return handlers;
+  };
+  props = { week: initialWeek, jumpWeek: initialWeek, jumpVersion: 0, active: true,
+    onWeekChange: week => { props.week = week; seen.push(week); },
+    onPeriodChange: period => { selected = period; periods.push(period); }, cardPointerHandlers: {}, cursorActive: false };
+  render();
+  return {
+    seen, element, periods,
+    get selected() { return selected; },
+    resize(height) { if (height) element.clientHeight = height; resizeCallbacks.forEach(fn => fn()); render(); },
+    get commands() { return commands; }, get animation() { return animation; },
+    jump(week) { selected = Math.floor(week / 7); props.jumpWeek = week; props.jumpVersion++; return render(); },
+    advance(ms = 10000) {
+      const a = animation;
+      while (a && !a.stopped && a.time < ms) {
+        a.time = Math.min(ms, a.time + 1000 / 60);
+        const sample = a.generator.next(a.time);
+        a.value.set(sample.value); render();
+        if (sample.done) { a.options.onComplete(); break; }
+      }
+    },
+    handlers: render,
+  };
+}
+for (const [start, target] of [[0,7],[0,21],[21,0],[27,0],[14,7]]) {
+  const rail = createRail(start); rail.jump(target);
+  const sign = Math.sign(target - start);
+  assert.equal(rail.animation.value.get(), 28 + start, 'command must not jump');
+  rail.advance();
+  assert.deepEqual(rail.seen, Array.from({length: Math.abs(target-start)}, (_,i) => start + (i+1)*sign), 'visit every intervening week in order');
+  assert.equal(rail.animation.value.get(), 28 + target);
+  assert.equal(rail.element.scrollTop, (28 + target)*180);
+  assert.equal(rail.commands, 1, 'intermediate week renders must not restart travel');
+  assert.deepEqual(rail.periods, [Math.floor(target / 7)], 'only final destination may update indicators during travel');
+}
+const locked = createRail(); locked.jump(21); locked.advance(200);
+assert(locked.seen.length > 0 && locked.seen.at(-1) < 21);
+assert.equal(locked.selected, 3); assert.deepEqual(locked.periods, []);
+const moving = locked.animation; const beforeResize = moving.value.get();
+locked.resize(); assert.equal(moving.value.get(), beforeResize); assert(!moving.stopped);
+locked.resize(1200); assert.equal(moving.value.get(), beforeResize); assert(!moving.stopped);
+assert.equal(locked.element.scrollTop, beforeResize * 220);
+locked.advance(); assert.equal(locked.selected, 3); assert.equal(moving.value.get(), 49);
+assert.equal(locked.element.scrollTop,49*220);
+const rapid = createRail(); rapid.jump(21); rapid.advance(200);
+const from = rapid.animation.value.get(); const previous = rapid.animation;
+rapid.jump(0); assert(previous.stopped); assert.equal(rapid.animation.value.get(), from);
+rapid.advance(); assert.equal(rapid.animation.value.get(), 28);
+const manual = createRail(); manual.jump(21); manual.advance(200);
+const interrupted = manual.animation; const current = interrupted.value.get();
+manual.handlers().interruptTravel(); assert(interrupted.stopped);
+assert.equal(manual.selected, Math.floor((((Math.round(current) % 28) + 28) % 28) / 7));
+assert.equal(manual.element.scrollTop, current*180);
+manual.element.scrollTop += 180; manual.handlers().scroll(); assert.equal(manual.commands, 2);
+const reduced = createRail(0,true); reduced.jump(21);
+assert.equal(reduced.commands,0); assert.deepEqual(reduced.seen,[21]);
+assert.equal(reduced.element.scrollTop,49*180);
+console.log('PASS: locked destination, separate indicator callbacks, resize continuity, and actual Motion keyframes at 60fps visit every intervening week forward/reverse, land exactly, survive intermediate renders, retarget continuously, allow manual takeover, and respect reduced motion.');

@@ -16,13 +16,22 @@ and open http://localhost:3333. Local CORS origins are configured in Sanity.
 
 ## Content
 
-Create and publish a **Project** in the Studio, including a generated slug. Create
-**Process Entries**, choose their Project reference, add an entry date, and publish.
-The homepage lists published projects. `/projects/[slug]` shows their entries in
-chronological order, with Portable Text notes and images.
+The homepage's Scroll cards and List rows/previews read the same published **Week
+Posts** (`post`) from Sanity. Each post has a continuous week number, title,
+**Period Category** reference (`category`), entry date, card image with alt text,
+and rich-text notes. Category membership determines the active tab and its first
+week; published post counts determine ranges and loop length. There is no fixed
+seven-week assumption in the app's navigation.
 
-The homepage shows an empty state until a project is published. Missing project
-slugs return 404. Drafts are not shown on the public website.
+Edit the four period categories and 28 published mock posts at
+https://processbook.sanity.studio/. Replace the mock titles, notes, images and
+crop/hotspot settings, then publish. Sanity Live updates published content in the
+website without an application rebuild. Drafts stay private. An empty dataset
+shows an empty state; a category without posts is disabled. Text/image edits keep
+the current position; changing membership/order safely resets the scrolling loops.
+
+The older `/projects/[slug]` pages and their original schemas remain available
+for existing project content; they do not supply the homepage's weekly posts.
 
 ## Sanity integration
 

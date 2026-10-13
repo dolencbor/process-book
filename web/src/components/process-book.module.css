@@ -1,0 +1,205 @@
+.app {
+  --ink: #0a0a0a;
+  --gray: #808080;
+  --surface: #f6f6f6;
+  --stroke: #e5e5e5;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-suisse-intl-book), Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  font-feature-settings: normal;
+}
+.app button { font: inherit; font-feature-settings: inherit; cursor: pointer; text-align: left; }
+/* Per-element OpenType profiles audited from the three Figma sections. */
+.owner > span, .categoryName, .year { font-feature-settings: "case" 1, "calt" 0, "lnum" 1, "tnum" 1; }
+.bookTitle { font-feature-settings: "calt" 0; }
+.range, .viewToggle button { font-feature-settings: "calt" 0, "lnum" 1, "tnum" 1; }
+.selectedWeek, .selectedTitle, .tableRow { font-feature-settings: "lnum" 1, "tnum" 1; }
+.exploreCursor, .touchExplore { font-feature-settings: "ordn" 1, "calt" 0, "lnum" 1, "tnum" 1; }
+.app button:focus-visible { outline: 2px solid #006bff; outline-offset: 2px; }
+.header { position: absolute; z-index: 5; top: 8px; left: 8px; right: 8px; display: flex; height: 32px; }
+.identity { position: relative; display: flex; align-items: center; justify-content: space-between; min-width: 0; flex: 1; height: 32px; padding: 4px 12px 4px 4px; --corner-stroke-opacity: 0.5; --corner-stroke: rgb(255 255 255 / var(--corner-stroke-opacity)); border: 1px solid var(--corner-stroke); --corner-radius: 10px; border-radius: var(--corner-radius); background: rgb(235 235 235 / 90%); backdrop-filter: blur(8px); }
+.owner { display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+.owner picture { display: flex; }
+.owner img, .category img { flex: 0 0 22px; width: 22px; height: 22px; }
+.bookTitle { display: flex; gap: 8px; white-space: nowrap; }
+.year { color: var(--gray); font-family: var(--font-suisse-intl-regular), Arial, Helvetica, sans-serif; }
+.categories { position: fixed; isolation: isolate; contain: layout; z-index: 5; top: 44px; left: 8px; right: 8px; display: flex; gap: 4px; height: 32px; }
+.app .category { position: relative; display: flex; align-items: center; flex: 1 0 0%; min-width: 32px; height: 32px; padding: 4px 12px 4px 4px; --corner-stroke-opacity: 0.2; --corner-stroke: rgb(255 255 255 / var(--corner-stroke-opacity)); border: 1px solid var(--corner-stroke); --corner-radius: 10px; border-radius: var(--corner-radius); overflow: hidden; background: var(--tab-fill); white-space: nowrap; font-size: 12px; line-height: 1.2; letter-spacing: -0.24px; }
+.categoryContent { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; padding: 4px; overflow: hidden; }
+.categorySurface { position: absolute; inset: -1px; z-index: 0; display: block; width: calc(100% + 2px); height: calc(100% + 2px); pointer-events: none; }
+.categorySurfaceFocus { opacity: 0; }
+.category:focus-visible .categorySurfaceFocus { opacity: 1; }
+.category img { display: block; }
+.app .category:disabled { cursor: default; opacity: 0.5; }
+.categoryName, .range { position: absolute; top: 8px; display: block; height: 14px; overflow: hidden; white-space: pre; font-kerning: normal; }
+.categoryName { left: calc(26px + var(--tab-icon-gap)); width: var(--tab-label-width); }
+.range { left: calc(26px + var(--tab-icon-gap) + var(--tab-label-width) + 10px); right: 12px; }
+.categoryName > span, .range > span { display: block; }
+/* Keep the text attached to the right edge throughout the resize. The outer
+   mask protects the name gap without stopping and redirecting the text. */
+.range > span { position: absolute; right: 0; width: var(--tab-range-width); }
+.content { position: absolute; inset: 0 8px; }
+.screenField { position: absolute; inset: 0; }
+.screenPanel { position: absolute; top: 0; bottom: 0; width: 100%; }
+.screenPanel[inert], .viewToggle[inert] { pointer-events: none; }
+.scrollStage { position: sticky; top: 0; --card-size: min(28.0423vw, calc((100dvh - 156px) / 1.75472)); display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; height: 100dvh; padding-top: 76px; }
+.selectedWeek { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.selectedWeek, .selectedTitle { font-size: 24px; line-height: 1; text-align: center; letter-spacing: -0.03em; }
+.screenTextMask { overflow: hidden; }
+.weekReveal { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.titleReveal { display: inline-grid; vertical-align: bottom; }
+.number { font-variant-numeric: lining-nums tabular-nums slashed-zero; font-feature-settings: "zero" 1, "lnum" 1, "tnum" 1; }
+.stack { position: relative; contain: layout; overflow: hidden; justify-self: center; width: var(--card-size); height: calc(var(--card-size) * 1.75472 + 32px); flex-shrink: 0; }
+.stackCard { position: absolute; display: block; overflow: hidden; background: var(--surface); }
+.stackCard[data-center="false"] { pointer-events: none; }
+.far { width: 77.3585%; height: calc(var(--card-size) * 0.150944); --corner-radius: 20px; border-radius: var(--corner-radius); }
+.near { width: 88.6792%; height: calc(var(--card-size) * 0.226415); --corner-radius: 24px; border-radius: var(--corner-radius); }
+.mainCard { width: 100%; aspect-ratio: 1; --corner-radius: 32px; border-radius: var(--corner-radius); }
+.cmsCrop { position: absolute; display: block; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.cmsCrop img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.emptyState { position: absolute; inset: 76px 16px 0; display: grid; place-content: center; color: var(--gray); }
+.railMedia { position: absolute; display: block; width: 100%; aspect-ratio: 1; top: 50%; translate: 0 -50%; pointer-events: none; }
+.topFade, .bottomFade { position: absolute; left: 0; width: 100%; height: calc(var(--card-size) * 0.396226); background: url("/design/rail-fade.webp") 0 0 / 100% 100% no-repeat; pointer-events: none; }
+.topFade { top: 0; }
+.bottomFade { bottom: 0; transform: scaleY(-1); }
+.exploreCursorAnchor { position: fixed; top: 0; left: 0; z-index: 10; width: 0; height: 0; pointer-events: none; }
+.exploreCursor { position: absolute; top: 0; left: 0; display: flex; align-items: center; justify-content: center; width: 129px; height: 42px; overflow: hidden; border-radius: 50px; background: rgb(255 255 255 / 90%); backdrop-filter: blur(8px); color: var(--ink); font-size: 14px; line-height: 1; pointer-events: none; box-shadow: 0 2px 3px rgb(0 0 0 / 3%), 0 6px 6px rgb(0 0 0 / 3%), 0 14px 9px rgb(0 0 0 / 2%), 0 25px 10px transparent, 0 40px 11px transparent; }
+/* Figma's inside stroke does not participate in this pill's auto-layout. */
+.exploreCursor::before { content: ""; position: absolute; inset: 0; padding: 1px; border-radius: inherit; pointer-events: none; background: linear-gradient(rgb(0 0 0 / 5%), rgb(0 0 0 / 10%)); mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; }
+.exploreCursorContent { position: absolute; left: calc(50% - 36.5px); top: calc(50% - 7px); display: inline-flex; width: 73px; align-items: center; justify-content: center; gap: 10px; height: 14px; }
+.exploreCursorText { flex: 0 0 51px; width: 51px; }
+.exploreCursorArrow { flex: 0 0 12px; width: 12px; }
+.touchExplore { display: none; position: absolute; bottom: 16px; right: 16px; padding: 12px 20px; border-radius: 50px; background: white; color: var(--ink); }
+.exploreCursor, .touchExplore { font-family: var(--font-suisse-intl-book), Arial, Helvetica, sans-serif; font-weight: 400; letter-spacing: 0; }
+.mainCard:focus-visible .touchExplore { display: block; }
+.viewToggle { position: absolute; z-index: 4; right: 8px; bottom: 16px; display: flex; align-items: center; width: 196px; height: 32px; padding: 1px; border: 1px solid transparent; --corner-radius: 10px; border-radius: var(--corner-radius); background: transparent; backdrop-filter: blur(8px); }
+/* The fixed SVG paints Figma's smoothed fill, stroke and shape-aware inset
+   effects. A CSS inset shadow would become rectangular after corner clipping. */
+.switcherSurface { position: absolute; inset: -1px; z-index: 0; display: block; width: calc(100% + 2px); height: calc(100% + 2px); pointer-events: none; }
+.viewToggle button { --corner-stroke: transparent; --corner-stroke-opacity: 0; position: relative; z-index: 1; display: flex; flex: 0 0 96px; align-items: center; justify-content: center; gap: 8px; width: 96px; height: 28px; padding: 6px 12px 6px 8px; border: 0; overflow: hidden; --corner-radius: 8px; border-radius: var(--corner-radius); background: transparent; color: var(--gray); font-size: 12px; line-height: 1.2; letter-spacing: -0.24px; white-space: nowrap; }
+.viewToggle button[data-view="scroll"] { --view-label-width: 32px; }
+.viewToggle button[data-view="table"] { --view-label-width: 20px; }
+.viewToggle button:focus-visible { outline: none; }
+.viewLabel { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.viewText { display: block; flex: 0 0 var(--view-label-width); width: var(--view-label-width); height: 14px; font-kerning: normal; }
+.viewIcon { position: relative; display: block; flex: 0 0 14px; width: 14px; height: 14px; }
+.viewIcon > img,
+.viewIcon > span { position: absolute; inset: 0; }
+.viewIcon img { display: block; width: 14px; height: 14px; }
+.viewToggle button[aria-pressed="true"] { color: var(--surface); }
+.activeView { position: absolute; z-index: 0; top: 50%; left: 1px; translate: 0 -50%; width: 96px; height: 28px; pointer-events: none; border: 1px solid transparent; --corner-radius: 8px; border-radius: var(--corner-radius); background: transparent; }
+/* List's animated white header and hover layers must never paint or hit-test
+   over the global tabs. Keep their entire composited area below y=76, while
+   the inset canvas preserves the original horizontal content coordinates. */
+.tableView { --table-heading-height: 281px; --table-top: 76px; position: absolute; inset: var(--table-top) -8px 0; overflow: hidden; isolation: isolate; }
+.tableCanvas { position: absolute; inset: 0 8px; }
+.tableHeader { position: absolute; z-index: 2; top: 0; left: -8px; right: -8px; height: calc(var(--table-heading-height) - var(--table-top)); padding: calc(124px - var(--table-top)) 8px 0; background: #fff; }
+.tableScroll { position: absolute; inset: calc(var(--table-heading-height) - var(--table-top)) 0 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior-y: contain; overflow-anchor: none; scrollbar-width: none; scroll-behavior: auto; }
+.tableScroll::-webkit-scrollbar { display: none; }
+.tableContent { position: relative; flex-shrink: 0; width: 100%; }
+.tableHero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; font-size: clamp(40px, 5.291vw, 80px); line-height: 1; letter-spacing: -0.05em; white-space: nowrap; }
+.tableHero h1 { min-width: 0; font: inherit; }
+.tableTitleMask { display: inline-grid; overflow: hidden; vertical-align: top; line-height: 1; }
+.tableTitleMask > span { display: block; grid-area: 1 / 1; }
+.tableRange { flex-shrink: 0; color: var(--gray); font-feature-settings: "lnum" 1, "tnum" 1; }
+.tableRange .numberMask { line-height: 1; }
+.tableHeader .tableHeading { position: absolute; left: 8px; right: 8px; top: calc(var(--table-heading-height) - var(--table-top) - 29px); padding: 8px; }
+.weekTable { position: relative; }
+.tableHeading, .tableRow { display: grid; grid-template-columns: calc((100% + 4px) / 4) minmax(0, 1fr); column-gap: 4px; border-bottom: 0.5px solid var(--stroke); }
+.tableHeading { height: 28.5px; align-items: center; font: 10px/1.2 var(--font-suisse-intl-mono), "Courier New", monospace; letter-spacing: -0.02em; text-transform: uppercase; color: var(--gray); }
+.tableRow { position: relative; min-height: 54.5px; padding: 20px 8px; align-items: center; font-family: var(--font-suisse-intl-book), Arial, Helvetica, sans-serif; font-weight: 400; font-size: 14px; line-height: 1; letter-spacing: -0.02em; }
+.tableWeek { display: inline-flex; align-items: center; gap: 6px; }
+.tableWeek .number { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum" 1, "tnum" 1, "zero" 0; }
+.tableRow[data-preview="true"] { background: var(--surface); }
+.rowButton { position: static; display: block; width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.rowButton::after { position: absolute; content: ""; inset: 0; }
+.rowPreview { position: absolute; z-index: 1; left: 58.4893%; top: 0; width: 24.7995%; max-width: max(40px, calc(100dvh - var(--table-heading-height) - 64px)); aspect-ratio: 1; pointer-events: none; }
+.rowPreviewMask { position: absolute; inset: 0; translate: 0 -50%; overflow: hidden; --corner-radius: 24px; border-radius: var(--corner-radius); }
+.rowPreviewReveal, .rowPreviewImage { position: absolute; inset: 0; }
+/* Each moving picture keeps its own Figma curve as it crosses the outer mask. */
+.rowPreviewImage { overflow: hidden; --corner-radius: 24px; border-radius: var(--corner-radius); }
+@media (hover: hover) and (pointer: fine) { .mainCard[data-cursor-active="true"] { cursor: none !important; } }
+@media (hover: none) { .touchExplore { display: block; } }
+@media (max-width: 700px) {
+  .identity { flex-basis: 100%; }
+  .owner > span { display: none; }
+  .year { display: inline; }
+  .scrollStage { --card-size: min(calc((100vw - 16px) * 318 / 377), calc((100dvh - 244px) / 1.75472)); --rail-height: calc(var(--card-size) * 1.75472 + 24px); grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 16px 10px 16px minmax(0, 1fr) var(--rail-height); padding-bottom: 0; }
+  .selectedWeek, .selectedTitle { font-size: 16px; line-height: 1; letter-spacing: -0.02em; }
+  .selectedWeek { grid-row: 2; }
+  .selectedTitle { grid-row: 4; }
+  .selectedWeek .number { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum" 1, "tnum" 1, "zero" 0; }
+  .stack { grid-row: 6; height: var(--rail-height); left: 0.5px; }
+  .far { --corner-radius: 15px; }
+  .near { --corner-radius: 18px; }
+  .mainCard { --corner-radius: 24px; }
+  .mainCard .touchExplore, .mainCard:focus-visible .touchExplore { display: none; }
+  .topFade, .bottomFade { left: 50%; translate: -50% 0; width: calc(100vw - 16px); background-image: url("/design/mobile-rail-fade.webp"); }
+  .viewToggle { left: calc(50% + 0.5px); right: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); translate: -50% 0; }
+  .tableView { --table-heading-height: 263px; }
+  .tableHeader { padding: calc(124px - var(--table-top)) 16px 0; }
+  .tableHero { flex-direction: column; gap: 0; font-size: 36px; }
+  .tableHero h1 { max-width: 100%; }
+  .tableRange { align-self: flex-start; }
+  .tableHeading, .tableRow { grid-template-columns: 91px minmax(0, 1fr); column-gap: 4px; }
+  .tableScroll { left: -8px; right: -8px; scroll-snap-type: y mandatory; }
+  .tableScroll[data-travelling="true"] { scroll-snap-type: none; }
+  .tableHeader .tableHeading { left: 0; right: 0; }
+  .tableRow { height: auto; min-height: 57.5px; padding: 20px 8px; align-items: start; font-size: 14px; line-height: 17px; scroll-snap-align: start; }
+  .tableRange .number, .tableWeek .number { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum" 1, "tnum" 1, "zero" 0; }
+  .rowButton { height: auto; min-height: 17px; padding-right: 0; overflow-wrap: anywhere; }
+  .rowPreview { left: auto; right: 8px; top: auto; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); width: min(178px, 45.3vw); max-width: max(64px, calc(100dvh - var(--table-heading-height) - 88px - env(safe-area-inset-bottom, 0px))); }
+  .rowPreviewMask { translate: 0 0; }
+}
+@media (max-height: 500px) {
+  .tableView { --table-heading-height: 205px; }
+  .tableHeader { padding-top: calc(104px - var(--table-top)); }
+  .tableHero { flex-direction: row; gap: 12px; font-size: clamp(18px, 3vw, 36px); }
+}
+@media (prefers-reduced-motion: reduce) { .app *, .app *::after { scroll-behavior: auto !important; } }
+
+/* Keep circular radii as the no-JS fallback; measured Figma curves replace them. */
+.app [data-smooth-corners]:not([data-smooth-surface])[style*="--smooth-path"] {
+  border-radius: 0;
+  border-color: transparent;
+  clip-path: var(--smooth-path);
+}
+/* A persistent inline SVG paints the Figma curve and inside stroke. Neither
+   image URLs nor whole-button clip paths change during the resize animation. */
+.app .category[data-smooth-surface][data-surface-ready] {
+  isolation: isolate;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.app .category[data-smooth-surface][data-surface-ready]:focus-visible { outline: none; }
+.app [data-smooth-corners]:not([data-smooth-surface])[style*="--smooth-path"]::after {
+  content: "";
+  position: absolute;
+  inset: var(--smooth-border-inset, 0);
+  z-index: 2;
+  pointer-events: none;
+  background: var(--smooth-border) 0 0 / 100% 100% no-repeat;
+}
+.app button[data-smooth-corners]:not([data-smooth-surface]):focus-visible::after {
+  background-image: var(--smooth-focus);
+}
+
+.scrollViewport { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scroll-behavior: auto; scrollbar-width: none; }
+.scrollViewport::-webkit-scrollbar { display: none; }
+.scrollViewport:focus-visible { outline: none; }
+.scrollViewport:focus-visible .stack { outline: 2px solid #006bff; outline-offset: 4px; }
+.scrollTrack { position: relative; height: calc((var(--week-count) - 1) * var(--scroll-step, 180px) + 100dvh); }
+.textMask { position: relative; display: inline-grid; overflow: hidden; vertical-align: bottom; line-height: 1.15; }
+.textMask > span { grid-area: 1 / 1; display: block; }
+.numberMask { display: inline-flex; justify-content: center; width: 2ch; line-height: 1.15; vertical-align: bottom; }
+.digitMask { display: inline-grid; overflow: hidden; }
+.digitMask > span { grid-area: 1 / 1; display: block; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
