@@ -150,7 +150,7 @@
   .tableHero h1 { max-width: 100%; }
   .tableRange { align-self: flex-start; }
   .tableHeading, .tableRow { grid-template-columns: 91px minmax(0, 1fr); column-gap: 4px; }
-  .tableScroll { z-index: 1; left: -8px; right: -8px; scroll-snap-type: y mandatory; }
+  .tableScroll { z-index: 1; left: -8px; right: -8px; scroll-snap-type: y proximity; }
   .tableScroll[data-travelling="true"] { scroll-snap-type: none; }
   .mobileTopRowHighlight { display: block; position: absolute; z-index: 0; top: calc(var(--table-heading-height) - var(--table-top)); left: -8px; right: -8px; height: var(--mobile-top-row-height, 57.5px); background: var(--surface); pointer-events: none; }
   .tableRow[data-preview="true"] { background: transparent; }

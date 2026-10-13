@@ -23,7 +23,7 @@ assert.equal(mobile(".tableHero").gap, "0");
 assert.equal(mobile(".tableRange")["align-self"], "flex-start");
 assert.equal(mobile(".tableHeading, .tableRow")["grid-template-columns"], "91px minmax(0, 1fr)");
 assert.equal(mobile(".tableHeading, .tableRow")["column-gap"], "4px");
-assert.equal(mobile(".tableScroll")["scroll-snap-type"], "y mandatory");
+assert.equal(mobile(".tableScroll")["scroll-snap-type"], "y proximity", "List rows align gently without interrupting a fast scan");
 assert.equal(mobile(".scrollViewport")["touch-action"], "pan-x pinch-zoom", "a finger gesture must choose a card on release, not drag the rail");
 assert.equal(mobile(".tableScroll")["z-index"], "1");
 assert.equal(mobile('.tableScroll[data-travelling="true"]')["scroll-snap-type"], "none");
@@ -104,4 +104,4 @@ for (let i=0; i<original.length; i+=4) {
   assert.equal(original[i+3],compressed[i+3]);
   if (original[i+3]) assert(original.subarray(i,i+3).equals(compressed.subarray(i,i+3)), "mobile logo's visible pixels must survive WebP conversion");
 }
-console.log("PASS: mobile Figma geometry, native snapping, variable-height rows, safe-area spacing and List label are configured; all six raster source hashes match Figma, files are local, and the new logo's visible pixels are preserved.");
+console.log("PASS: mobile Figma geometry, List proximity alignment, variable-height rows, safe-area spacing and List label are configured; all six raster source hashes match Figma, files are local, and the new logo's visible pixels are preserved.");

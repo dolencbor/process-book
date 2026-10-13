@@ -389,12 +389,12 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const aligned = Math.abs(scroll.scrollTop - rows[index].offsetTop) <= 1;
     if (mobile) {
       setMobileSnapped(settled && aligned);
-      if (settled && aligned) {
-        sizeMobileHighlight(index);
-        if (previewEntry.current !== index || !visible.current) show(index);
-      }
+      if (settled && aligned) sizeMobileHighlight(index);
+      // A fast flick can cross many rows before the 680ms image transition
+      // ends. Let the week and period labels track live; swap one preview at rest.
+      if (settled && (previewEntry.current !== index || !visible.current)) show(index);
     }
-    if ((!mobile || settled && aligned) && indicated.current.week !== week) { indicated.current.week = week; onWeekChange(week); }
+    if (indicated.current.week !== week) { indicated.current.week = week; onWeekChange(week); }
     if (indicated.current.period !== period) { indicated.current.period = period; onPeriodChange(period); }
   };
 
@@ -455,14 +455,11 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const settleMobileList = () => {
     if (!mobile || !active || travelling.current || listTouching.current) return;
     const scroll = viewport.current;
-    const { rows, ends, ready } = rowGeometry.current;
-    if (!scroll || !ready || !rows.length) return;
+    if (!scroll || !rowGeometry.current.ready) return;
     if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
     mobileSettleTimer.current = null;
-    const first = Math.max(0, ends.findIndex(end => end > scroll.scrollTop + 0.5));
-    const next = Math.min(first + 1, rows.length - 1);
-    const entry = Math.abs(scroll.scrollTop - rows[next].offsetTop) < Math.abs(scroll.scrollTop - rows[first].offsetTop) ? next : first;
-    if (Math.abs(scroll.scrollTop - rows[entry].offsetTop) > 0.5) scroll.scrollTop = rows[entry].offsetTop;
+    // Proximity snapping belongs to the browser. Do not pull a free-scrolling
+    // list to the next row after momentum has ended.
     recycle();
     indicatePeriod(true);
   };
@@ -482,7 +479,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
       setMobileSnapped(false);
     }
-    // Native snapping is suspended during Motion travel so Safari cannot snap
+    // Native proximity snapping is suspended during Motion travel so Safari cannot snap
     // individual writes to another row. Restore it at the exact destination.
     scroll.dataset.travelling = "true";
     const target = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, row.offsetTop));
@@ -992,7 +989,6 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     if (settleTimer.current) clearTimeout(settleTimer.current);
     const current = Math.round(inputPosition.get());
     const target = absolute ? Math.floor(current / weeks.length) * weeks.length + value : current + value;
-    element.focus({ preventScroll: true });
     inputPosition.set(target);
     if (momentum && !reducedMotion && gestureVelocity !== undefined) {
       const direction = Math.sign(value);

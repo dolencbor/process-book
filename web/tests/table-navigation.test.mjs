@@ -143,15 +143,20 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.preview.week,7); assert.equal(mobile.category,1);
   mobile.manual(mobile.at(14).offsetTop-1,false);
   assert.equal(mobile.snapped,false,'the gray highlight disappears between snap points');
-  assert.equal(mobile.preview.week,7,'an in-between row cannot replace the last selected week');
-  assert.equal(mobile.visibleWeeks.at(-1),7);
+  assert.equal(mobile.preview.week,7,'fast scrolling does not start an image transition for every crossed row');
+  assert.equal(mobile.visibleWeeks.at(-1),13,'switching views uses the top visible week');
   mobile.manual(mobile.at(14).offsetTop,false);
   assert.equal(mobile.snapped,false,'passing exactly through a row start cannot flash the gray highlight');
-  assert.equal(mobile.visibleWeeks.at(-1),7);
+  assert.equal(mobile.visibleWeeks.at(-1),14);
   mobile.hold(true);
   mobile.settle();
   assert.equal(mobile.snapped,false,'List never snaps under a finger held on the rows');
   mobile.hold(false);
+  mobile.manual(mobile.at(14).offsetTop+32,false);
+  mobile.settle();
+  assert.equal(mobile.element.scrollTop,mobile.at(14).offsetTop+32,'settling does not force a free-scrolling row to align');
+  assert.equal(mobile.snapped,false,'a row remains unhighlighted when proximity snap did not align it');
+  assert.equal(mobile.preview.week,14,'the preview catches up with the selected row when scrolling rests');
   mobile.manual(mobile.at(14).offsetTop,false);
   mobile.settle();
   assert.equal(mobile.element.scrollTop,mobile.at(14).offsetTop);
@@ -193,7 +198,7 @@ const highlightWrites=mobileWorkload.highlightWrites;
 const mobileBurst=mobileWorkload.burst(1000,mobileWorkload.at(14).offsetTop);
 assert.equal(mobileBurst.queued,1,'mobile scroll and touch-adjacent events share one frame');
 assert.equal(mobileWorkload.highlightWrites,highlightWrites,'stationary mobile rows do not repaint the fixed highlight during rapid scroll events');
-console.log('PASS: mobile preview follows the top row across variable heights, link focus and tab travel; native snapping is restored on arrival/interruption.');
+console.log('PASS: mobile week selection follows free scrolling while the preview waits for rest; proximity alignment highlights only settled rows, and tab travel remains stable.');
 
 // Boundary crossings preserve sub-row position, update the correct period,
 // and recycle a fixed-size DOM rather than adding rows each lap.
@@ -204,7 +209,7 @@ for (const mobile of [false,true]) for (const height of [400,600,900,1200,2200,4
   looping.manual(2*h+12.25,false);
   assert.equal(looping.element.scrollTop,h+12.25);assert.equal(looping.visibleWeeks.at(-1),0);assert.equal(looping.category,0);
   looping.manual(h-12.25,false);
-  assert.equal(looping.element.scrollTop,2*h-12.25);assert.equal(looping.visibleWeeks.at(-1),mobile?0:27);assert.equal(looping.category,3);
+  assert.equal(looping.element.scrollTop,2*h-12.25);assert.equal(looping.visibleWeeks.at(-1),27);assert.equal(looping.category,3);
   if (mobile) assert.equal(looping.snapped,false,'a loop crossing remains unhighlighted until it lands');
   for(let lap=0;lap<100;lap++) {
     looping.manual(2*h+3.75,false);assert.equal(looping.element.scrollTop,h+3.75);
