@@ -23,15 +23,14 @@ assert.equal(mobile(".tableHero").gap, "0");
 assert.equal(mobile(".tableRange")["align-self"], "flex-start");
 assert.equal(mobile(".tableHeading, .tableRow")["grid-template-columns"], "91px minmax(0, 1fr)");
 assert.equal(mobile(".tableHeading, .tableRow")["column-gap"], "4px");
-assert.equal(mobile(".tableScroll")["scroll-snap-type"], "y proximity", "List rows align gently without interrupting a fast scan");
+assert.equal(mobile(".tableScroll")["scroll-snap-type"], undefined, "the mobile List has one Motion snap controller instead of a competing native snap");
 assert.equal(mobile(".scrollViewport")["touch-action"], "pan-x pinch-zoom", "a finger gesture must choose a card on release, not drag the rail");
 assert.equal(mobile(".tableScroll")["z-index"], "1");
-assert.equal(mobile('.tableScroll[data-travelling="true"]')["scroll-snap-type"], "none");
 assert.equal(mobile(".mobileTopRowHighlight").display, "block");
 assert.equal(mobile(".mobileTopRowHighlight").top, "calc(var(--table-heading-height) - var(--table-top))");
 assert.equal(mobile(".mobileTopRowHighlight").height, "var(--mobile-top-row-height, 57.5px)");
 assert.equal(mobile('.tableRow[data-preview="true"]').background, "transparent", "mobile highlight is one fixed slot, not repeated row backgrounds");
-assert.equal(mobile(".tableRow")["scroll-snap-align"], "start");
+assert.equal(mobile(".tableRow")["scroll-snap-align"], undefined);
 assert.equal(mobile(".tableRow")["min-height"], "57.5px");
 assert.equal(mobile(".tableRow").height, "auto", "long titles must expand the row");
 assert.equal(mobile(".tableRow").padding, "20px 8px");
@@ -104,4 +103,4 @@ for (let i=0; i<original.length; i+=4) {
   assert.equal(original[i+3],compressed[i+3]);
   if (original[i+3]) assert(original.subarray(i,i+3).equals(compressed.subarray(i,i+3)), "mobile logo's visible pixels must survive WebP conversion");
 }
-console.log("PASS: mobile Figma geometry, List proximity alignment, variable-height rows, safe-area spacing and List label are configured; all six raster source hashes match Figma, files are local, and the new logo's visible pixels are preserved.");
+console.log("PASS: mobile Figma geometry, single-controller List row alignment, variable-height rows, safe-area spacing and List label are configured; all six raster source hashes match Figma, files are local, and the new logo's visible pixels are preserved.");

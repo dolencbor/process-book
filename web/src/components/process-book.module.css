@@ -102,6 +102,8 @@
 .tableCanvas { position: absolute; inset: 0 8px; }
 .tableHeader { position: absolute; z-index: 2; top: 0; left: -8px; right: -8px; height: calc(var(--table-heading-height) - var(--table-top)); padding: calc(124px - var(--table-top)) 8px 0; background: #fff; }
 .tableScroll { position: absolute; inset: calc(var(--table-heading-height) - var(--table-top)) 0 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior-y: contain; overflow-anchor: none; scrollbar-width: none; scroll-behavior: auto; }
+.tableScroll[data-travelling="true"], .tableScroll[data-snapping], .scrollViewport[data-travelling="true"] { overflow-y: hidden; }
+.tableScroll:focus-visible { outline: none; }
 .tableScroll::-webkit-scrollbar { display: none; }
 .tableContent { position: relative; flex-shrink: 0; width: 100%; }
 .tableHero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; font-size: clamp(40px, 5.291vw, 80px); line-height: 1; letter-spacing: -0.05em; white-space: nowrap; }
@@ -121,6 +123,7 @@
 .mobileTopRowHighlight { display: none; }
 .rowButton { position: static; display: block; width: 100%; min-width: 0; overflow-wrap: anywhere; }
 .rowButton::after { position: absolute; content: ""; inset: 0; }
+.rowPreviewViewport { position: absolute; z-index: 3; inset: calc(var(--table-heading-height) - var(--table-top)) 0 0; overflow: hidden; pointer-events: none; }
 .rowPreview { position: absolute; z-index: 1; left: 58.4893%; top: 0; width: 24.7995%; max-width: max(40px, calc(100dvh - var(--table-heading-height) - 64px)); aspect-ratio: 1; pointer-events: none; }
 .rowPreviewMask { position: absolute; inset: 0; translate: 0 -50%; overflow: hidden; --corner-radius: 24px; border-radius: var(--corner-radius); }
 .rowPreviewReveal, .rowPreviewImage { position: absolute; inset: 0; }
@@ -150,12 +153,11 @@
   .tableHero h1 { max-width: 100%; }
   .tableRange { align-self: flex-start; }
   .tableHeading, .tableRow { grid-template-columns: 91px minmax(0, 1fr); column-gap: 4px; }
-  .tableScroll { z-index: 1; left: -8px; right: -8px; scroll-snap-type: y proximity; }
-  .tableScroll[data-travelling="true"] { scroll-snap-type: none; }
+  .tableScroll { z-index: 1; left: -8px; right: -8px; }
   .mobileTopRowHighlight { display: block; position: absolute; z-index: 0; top: calc(var(--table-heading-height) - var(--table-top)); left: -8px; right: -8px; height: var(--mobile-top-row-height, 57.5px); background: var(--surface); pointer-events: none; }
   .tableRow[data-preview="true"] { background: transparent; }
   .tableHeader .tableHeading { left: 0; right: 0; }
-  .tableRow { height: auto; min-height: 57.5px; padding: 20px 8px; align-items: start; font-size: 14px; line-height: 17px; scroll-snap-align: start; }
+  .tableRow { height: auto; min-height: 57.5px; padding: 20px 8px; align-items: start; font-size: 14px; line-height: 17px; }
   .tableRange .number, .tableWeek .number { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum" 1, "tnum" 1, "zero" 0; }
   .rowButton { height: auto; min-height: 17px; padding-right: 0; overflow-wrap: anywhere; }
   .rowPreview { left: auto; right: 8px; top: auto; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); width: min(178px, 45.3vw); max-width: max(64px, calc(100dvh - var(--table-heading-height) - 88px - env(safe-area-inset-bottom, 0px))); }

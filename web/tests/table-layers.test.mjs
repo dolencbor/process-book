@@ -2,6 +2,11 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import postcss from "postcss";
 const sheet=postcss.parse(fs.readFileSync('src/components/process-book.module.css','utf8'));
+let travelOverflow;
+sheet.walkRules('.tableScroll[data-travelling="true"], .tableScroll[data-snapping], .scrollViewport[data-travelling="true"]', rule => {
+ rule.walkDecls('overflow-y', declaration => { travelOverflow=declaration.value; });
+});
+assert.equal(travelOverflow,'hidden','period-tab travel and mobile row snapping must pause native momentum');
 function declarations(selector,width,height){
  const props={};sheet.walkRules(selector,rule=>{
   const condition=rule.parent.type==='atrule'?rule.parent.params:'';
@@ -31,6 +36,9 @@ for(const [width,height] of [[1512,900],[393,852],[844,390],[393,400],[1920,1200
  assert.equal(shellLeft,0);assert.equal(shellWidth,width);assert.equal(canvas.inset,'0 8px');
  const headingEnd=length(vars['--table-heading-height'],vars);
  assert.equal(listTop+length(header.height,vars),headingEnd);
+ const previewClip=declarations('.rowPreviewViewport',width,height);
+ assert.equal(previewClip.overflow,'hidden','the floating image cannot paint behind the fixed heading');
+ assert.equal(listTop+length(previewClip.inset.split(' 0 ')[0],vars),headingEnd,'the image clip starts at the Week / Title divider');
  const titleTop=listTop+length(header['padding-top']||postcss.list.space(header.padding)[0],vars);
  assert.equal(titleTop,height<=500?104:124);
  assert.equal(listTop+length(labels.top,vars),headingEnd-29);

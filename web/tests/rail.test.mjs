@@ -16,7 +16,7 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
   const hooks = [], effects = [], subscriptions = [];
   let index = 0, animation = null, commands = 0, props, now = 0;
   const seen = [], periods = [], resizeCallbacks = []; let selected = Math.floor(initialWeek / 7);
-  const element = { clientHeight: 900, scrollTop: 0, style: { setProperty() {} }, scrollTo({top}) { this.scrollTop = top; }, focus() {} };
+  const element = { clientHeight: 900, scrollTop: 0, dataset: {}, style: { setProperty() {} }, scrollTo({top}) { this.scrollTop = top; }, focus() {} };
   const cards = { clientWidth: 530 };
   const hook = make => { const i = index++; return hooks[i] ??= make(); };
   const context = {
@@ -89,12 +89,14 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
 }
 for (const [start, target] of [[0,7],[0,21],[21,0],[27,0],[14,7]]) {
   const rail = createRail(start); rail.jump(target);
+  assert.equal(rail.element.dataset.travelling,'true','period travel blocks native momentum while Motion owns scroll');
   const sign = Math.sign(target - start);
   assert.equal(rail.animation.value.get(), 28 + start, 'command must not jump');
   rail.advance();
   assert.deepEqual(rail.seen, Array.from({length: Math.abs(target-start)}, (_,i) => start + (i+1)*sign), 'visit every intervening week in order');
   assert.equal(rail.animation.value.get(), 28 + target);
   assert.equal(rail.element.scrollTop, (28 + target)*180);
+  assert.equal(rail.element.dataset.travelling,undefined,'period travel restores native scrolling at its landing');
   assert.equal(rail.commands, 1, 'intermediate week renders must not restart travel');
   assert.deepEqual(rail.periods, [Math.floor(target / 7)], 'only final destination may update indicators during travel');
 }
@@ -110,10 +112,12 @@ assert.equal(locked.element.scrollTop,49*220);
 const rapid = createRail(); rapid.jump(21); rapid.advance(200);
 const from = rapid.animation.value.get(); const previous = rapid.animation;
 rapid.jump(0); assert(previous.stopped); assert.equal(rapid.animation.value.get(), from);
+assert.equal(rapid.element.dataset.travelling,'true','retargeting keeps the scroll under Motion control');
 rapid.advance(); assert.equal(rapid.animation.value.get(), 28);
 const manual = createRail(); manual.jump(21); manual.advance(200);
 const interrupted = manual.animation; const current = interrupted.value.get();
 manual.handlers().interruptTravel(); assert(interrupted.stopped);
+assert.equal(manual.element.dataset.travelling,undefined,'a user gesture releases the native scroller immediately');
 assert.equal(manual.selected, Math.floor((((Math.round(current) % 28) + 28) % 28) / 7));
 assert.equal(manual.element.scrollTop, current*180);
 manual.element.scrollTop += 180; manual.handlers().scroll(); assert.equal(manual.commands, 2);

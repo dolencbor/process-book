@@ -6,11 +6,11 @@ import { motionValue, keyframes } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekTableView(');
 const end = source.indexOf('  return <div className={styles.tableView}', start);
-const component = source.slice(start, end) + '  return { handleScroll, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition, mobileSnapped, listTouching };\n}';
+const component = source.slice(start, end) + '  return { handleScroll, handleWheel, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition, settleMobileList, mobileSnapped, listTouching };\n}';
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
 const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
-function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null) {
+function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null, roundedGeometry = false) {
   const hooks = [], effects = [], periods = [], visibleWeeks = [], navigations = []; let geometryReads=0, rowReads=0;
   let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, timerId = 0, handlers, activeElement = null; const frames = new Map(), timers = new Map();
   const flush = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(fn=>fn()); };
@@ -28,10 +28,11 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     let rowTop = 0;
     for (let i = 0; i < copies * 28; i++) {
       const button = { focus() { handlers.blurWeek(); activeElement = button; handlers.focusWeek(i); } };
-      const row = {offsetTop:rowTop,offsetHeight:mobile ? (i % 28 === 1 ? 108.5 : 57.5) : 54.5,
+      const actualHeight = mobile ? (i % 28 === 1 ? 108.5 : 57.5) : 54.5;
+      const row = {offsetTop:roundedGeometry ? Math.round(rowTop) : rowTop,offsetHeight:roundedGeometry ? Math.round(actualHeight) : actualHeight,
         dataset:{tableWeek:String(i % 28),tableEntry:String(i)},contains:node=>node===button,querySelector:()=>button};
-      row.getBoundingClientRect = () => ({top:heading+row.offsetTop-element.scrollTop,height:row.offsetHeight});
-      rowTop += row.offsetHeight; rows.push(row);
+      row.getBoundingClientRect = () => ({top:heading+row.offsetTop-element.scrollTop,height:actualHeight});
+      rowTop += actualHeight; rows.push(row);
     }
     element.scrollHeight = rowTop;
   }
@@ -55,6 +56,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     document:{get activeElement(){return activeElement;},elementFromPoint:()=>({closest:()=>rows[42]})},
     weeks:Array.from({length:28},(_,index)=>({id:`fixture-${index}`})),periodForWeek:n=>Math.floor(n/7),
     interfaceTransition:{type:'tween',duration:.68,ease:[.22,1,.36,1]},
+    mobileRowSnapTransition:{type:'tween',duration:.22,ease:[.22,1,.36,1]},
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
@@ -62,24 +64,24 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   const props={category:Math.floor(week/7),jumpWeek:week,jumpVersion:0,initialListLocation,active:true,onWeekSelect(){},
     onNavigate:(week,location)=>navigations.push({week,location}),
     onWeekChange:week=>visibleWeeks.push(week),onPeriodChange:period=>{props.category=period;periods.push(period);}};
-  const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[16].value);effects.splice(0).forEach(fn=>fn());return handlers;};
+  const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[17].value);effects.splice(0).forEach(fn=>fn());return handlers;};
   render(); render();
   return {
     element,periods,visibleWeeks,rows,navigations,
     get highlightHeight(){return canvasStyles.get('--mobile-top-row-height');},
     get highlightWrites(){return highlightWrites;},
-    get snapped(){return handlers.mobileSnapped;},
+    get snapped(){return handlers.mobileSnapped.current;},
     get cycleHeight(){return rows[28].offsetTop;},
     at(week){return rows[28+week];},
-    get preview(){return hooks[9].value;},
+    get preview(){return hooks[10].value;},
     focus(entry){ render(); rows[entry].querySelector().focus(); render(); },
-    get focusedEntry(){return hooks[6].current;},
+    get focusedEntry(){return hooks[7].current;},
     get activeEntry(){return rows.findIndex(row=>row.contains(activeElement));},
     burst(count,top=rows[42].offsetTop){
       const handlers=render(); const before=geometryReads,queries=rowReads;
       element.scrollTop=top;
       for(let i=0;i<count;i++){
-        hooks[7].current={x:950,y:600+i/100};
+        hooks[8].current={x:950,y:600+i/100};
         handlers.handleScroll();handlers.schedulePointer(false,42);
       }
       const queued=frames.size;flush();render();
@@ -90,6 +92,8 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     advance(ms=10000){const a=animation;while(a&&!a.stopped&&a.time<ms){a.time=Math.min(ms,a.time+1000/60);const sample=a.generator.next(a.time);a.options.onUpdate(sample.value);render().handleScroll();flush();if(sample.done){a.options.onComplete();render().handleScroll();flush();break;}}},
     manual(top,settle=true){element.scrollTop=top;render().handleScroll();flush();render();if(settle){flushTimers();render();}},
     settle(){flushTimers();render();},
+    lateSettle(){render().settleMobileList();render();},
+    wheel(deltaY=1){render().handleWheel({deltaY});render();},
     hold(value){handlers.listTouching.current=value;},
     capture(){render().captureListPosition();},
     interrupt(){render().interruptTravel();render();},
@@ -112,6 +116,16 @@ table.manual(table.at(27).offsetTop);assert.equal(table.category,3);assert.equal
 table.jump(0);table.advance();assert.equal(table.element.scrollTop,table.cycleHeight);assert.equal(table.category,0);
 const rapid=createTable();rapid.jump(21);rapid.advance(200);const previous=rapid.animation;const current=rapid.element.scrollTop;
 rapid.jump(7);assert(previous.stopped);assert.equal(rapid.element.scrollTop,current);rapid.advance();assert.equal(rapid.element.scrollTop,rapid.at(7).offsetTop);
+const boundaryTrip=createTable(852,21,false,true);
+boundaryTrip.jump(0);
+const interruptedBoundaryTrip=boundaryTrip.animation;
+boundaryTrip.element.scrollTop=boundaryTrip.cycleHeight-0.75;
+boundaryTrip.jump(21);
+assert(interruptedBoundaryTrip.stopped,'retargeting stops the first tab trip');
+assert.equal(boundaryTrip.animation.target,boundaryTrip.at(21).offsetTop,
+  'a rapid second tab click stays in the same repeated year at a cycle boundary');
+boundaryTrip.advance();
+assert.equal(boundaryTrip.element.scrollTop,boundaryTrip.at(21).offsetTop);
 const manual=createTable();manual.jump(21);manual.advance(200);manual.interrupt();assert(manual.animation.stopped);
 manual.manual(manual.at(14).offsetTop);assert.equal(manual.category,2);assert.equal(manual.visibleWeeks.at(-1),14);
 const repeated=createTable(); repeated.manual(repeated.cycleHeight+.75); repeated.jump(21); repeated.advance(10); repeated.interrupt();
@@ -142,12 +156,12 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.highlightHeight,'57.5px','the highlight returns to a single-line height');
   assert.equal(mobile.preview.week,7); assert.equal(mobile.category,1);
   mobile.manual(mobile.at(14).offsetTop-1,false);
-  assert.equal(mobile.snapped,false,'the gray highlight disappears between snap points');
+  assert.equal(mobile.snapped,false,'the row remains in motion between snap points');
   assert.equal(mobile.preview.week,13,'the top visible row changes the preview before scrolling rests');
-  assert.equal(mobile.highlightHeight,'1px','the selection covers only the remaining visible part of the top row');
+  assert.equal(mobile.highlightHeight,'57.5px','the top-row highlight follows the visible row height before snapping');
   assert.equal(mobile.visibleWeeks.at(-1),13,'switching views uses the top visible week');
   mobile.manual(mobile.at(14).offsetTop,false);
-  assert.equal(mobile.snapped,false,'passing exactly through a row start cannot flash the gray highlight');
+  assert.equal(mobile.snapped,false,'passing a row start is not a completed snap');
   assert.equal(mobile.preview.week,14);
   assert.equal(mobile.visibleWeeks.at(-1),14);
   mobile.manual(mobile.at(14).offsetTop-1,false);
@@ -162,14 +176,23 @@ for (const reducedMotion of [false,true]) {
   mobile.hold(false);
   mobile.manual(mobile.at(14).offsetTop+32,false);
   mobile.settle();
-  assert.equal(mobile.element.scrollTop,mobile.at(14).offsetTop+32,'settling does not force a free-scrolling row to align');
-  assert.equal(mobile.snapped,false,'a row remains unhighlighted when proximity snap did not align it');
-  assert.equal(mobile.preview.week,14,'the preview catches up with the selected row when scrolling rests');
+  if (!reducedMotion) {
+    assert.equal(mobile.animation.target,mobile.at(15).offsetTop,'the nearest row becomes the only landing target after momentum');
+    assert.equal(mobile.snapped,false,'the snap state stays pending until the row reaches its slot');
+    assert.equal(mobile.element.dataset.snapping,'true','native scrolling pauses while Motion owns the row detent');
+    mobile.advance();
+  }
+  assert.equal(mobile.element.scrollTop,mobile.at(15).offsetTop,'the controller actually lands on the next row');
+  if (!reducedMotion) {
+    assert.equal(mobile.element.dataset.snapping,undefined,'the detent releases native scrolling for the next gesture');
+  }
+  assert.equal(mobile.snapped,true,'the landed row is always highlighted');
+  assert.equal(mobile.preview.week,15);
   mobile.manual(mobile.at(14).offsetTop,false);
   mobile.settle();
   assert.equal(mobile.element.scrollTop,mobile.at(14).offsetTop);
   assert.equal(mobile.preview.week,14,'the nearest row becomes selected only after it aligns');
-  assert.equal(mobile.snapped,true,'the gray highlight returns at the settled row');
+  assert.equal(mobile.snapped,true,'the row is marked settled after it aligns');
   const beforeFocusTop=mobile.element.scrollTop, beforeFocusCommands=mobile.commands;
   mobile.focus(49);
   assert.equal(mobile.element.scrollTop,beforeFocusTop,'focusing a navigation link must not move it during a tap');
@@ -178,13 +201,13 @@ for (const reducedMotion of [false,true]) {
   mobile.jump(21);
   assert.equal(mobile.category,3);
   if (!reducedMotion) {
-    assert.equal(mobile.element.dataset.travelling,'true','native snap is suspended during Motion writes');
+    assert.equal(mobile.element.dataset.travelling,'true','tab travel owns its scroll writes');
     mobile.advance(100);assert.equal(mobile.category,3,'travel keeps the selected destination tab');
   }
   mobile.advance();
   assert.equal(mobile.element.scrollTop,mobile.at(21).offsetTop);
   assert.equal(mobile.preview.week,21);
-  assert.equal(mobile.element.dataset.travelling,undefined,'snapping is restored at the destination');
+  assert.equal(mobile.element.dataset.travelling,undefined,'tab travel releases the List at the destination');
   mobile.manual(mobile.at(27).offsetTop);
   assert.equal(mobile.preview.week,27);
   assert(mobile.element.scrollHeight-mobile.element.clientHeight>mobile.at(27).offsetTop,'rows continue beyond Week 28');
@@ -195,6 +218,73 @@ const fromScroll=createTable(852,17,false,true);
 assert.equal(fromScroll.element.scrollTop,fromScroll.at(17).offsetTop,'switching from Scroll places the same week at the List snap slot');
 assert.equal(fromScroll.preview.week,17);
 assert.equal(fromScroll.snapped,true);
+const rounded=createTable(852,0,false,true,null,true);
+assert.equal(rounded.at(1).offsetTop+rounded.at(1).offsetHeight,rounded.at(2).offsetTop+1,
+  'real browser geometry can overlap by one pixel when fractional rows are rounded separately');
+rounded.manual(rounded.at(2).offsetTop);
+assert.equal(rounded.preview.week,2,'a snapped row wins at its own start despite the previous rounded height');
+assert.equal(rounded.snapped,true,'the highlighted row returns at the browser snap position');
+assert.equal(rounded.highlightHeight,'57.5px','the highlight uses the rendered fractional row height');
+const endOfList=createTable(852,0,false,true);
+endOfList.manual(endOfList.element.scrollHeight-endOfList.element.clientHeight,false);
+endOfList.settle();endOfList.advance();
+assert.equal(endOfList.snapped,true,'even a fast flick to the physical end lands on a reachable row');
+assert.equal(endOfList.element.dataset.snapping,undefined,'an edge rebase releases native scrolling after its atomic jump');
+assert.equal(endOfList.element.scrollTop,endOfList.at(endOfList.preview.week).offsetTop,
+  'the final row is recycled to the canonical cycle without a stranded unhighlighted position');
+const wheelEdge=createTable(852,0,false,true);
+wheelEdge.manual(wheelEdge.element.scrollHeight-wheelEdge.element.clientHeight,false);
+wheelEdge.wheel();
+assert(wheelEdge.element.scrollTop>=wheelEdge.cycleHeight && wheelEdge.element.scrollTop<2*wheelEdge.cycleHeight,
+  'a clamped wheel input immediately moves the identical row away from the physical boundary');
+wheelEdge.lateSettle();
+assert.equal(wheelEdge.commands,0,'an early scrollend cannot start a competing snap during wheel momentum');
+wheelEdge.settle();wheelEdge.advance();
+assert.equal(wheelEdge.element.scrollTop,wheelEdge.at(wheelEdge.preview.week).offsetTop,
+  'a clamped wheel event at the physical edge still triggers the loop handoff');
+const edgeTab=createTable(852,0,false,true);
+edgeTab.manual(edgeTab.element.scrollHeight-edgeTab.element.clientHeight,false);
+edgeTab.jump(21);edgeTab.advance();
+assert.equal(edgeTab.element.scrollTop,edgeTab.at(21).offsetTop,'tab navigation uses a reachable repeated row near the scroll boundary');
+assert.equal(edgeTab.preview.week,21);
+assert.equal(edgeTab.snapped,true);
+const lastCopyTab=createTable(852,0,false,true);
+lastCopyTab.manual(2*lastCopyTab.cycleHeight+40,false);
+lastCopyTab.jump(0);lastCopyTab.advance();
+assert.equal(lastCopyTab.element.scrollTop,2*lastCopyTab.cycleHeight,
+  'a mobile tab trip stays in the repeated copy it visibly reached, without a one-year final-frame jump');
+lastCopyTab.lateSettle();
+assert.equal(lastCopyTab.element.scrollTop,2*lastCopyTab.cycleHeight,
+  'a late browser scrollend cannot rebase the completed tab trip');
+assert.equal(lastCopyTab.snapped,true);
+const laterPeriodFromOuterCopy=createTable(852,0,false,true);
+laterPeriodFromOuterCopy.manual(laterPeriodFromOuterCopy.rows[63].offsetTop);
+assert.equal(laterPeriodFromOuterCopy.element.scrollTop,laterPeriodFromOuterCopy.rows[35].offsetTop,
+  'a settled outer-copy row rebases to its identical center row before the next gesture');
+laterPeriodFromOuterCopy.jump(21);
+assert.equal(laterPeriodFromOuterCopy.animation.target,laterPeriodFromOuterCopy.at(21).offsetTop,
+  'the next tab animation starts from the canonical repeated year');
+assert(laterPeriodFromOuterCopy.animation.target>laterPeriodFromOuterCopy.element.scrollTop,
+  'selecting a later period travels forward after the rebase');
+laterPeriodFromOuterCopy.advance();
+assert.equal(laterPeriodFromOuterCopy.element.scrollTop,laterPeriodFromOuterCopy.at(21).offsetTop);
+const snapToTab=createTable(852,0,false,true);
+snapToTab.manual(snapToTab.at(10).offsetTop+32,false);
+snapToTab.settle();
+const abandonedSnap=snapToTab.animation;
+snapToTab.advance(65);
+snapToTab.jump(21);
+assert(abandonedSnap.stopped,'a period tab cancels the incomplete row detent');
+const firstTabTrip=snapToTab.animation;
+snapToTab.advance(100);
+snapToTab.jump(7);
+assert(firstTabTrip.stopped,'a second period tab cancels the first tab trip');
+snapToTab.settle();
+assert.equal(snapToTab.animation.target,snapToTab.at(7).offsetTop,'an old settle callback cannot replace the latest tab destination');
+snapToTab.advance();
+assert.equal(snapToTab.element.scrollTop,snapToTab.at(7).offsetTop);
+assert.equal(snapToTab.preview.week,7);
+assert.equal(snapToTab.snapped,true);
 const mobileInterrupted=createTable(852,0,false,true);
 mobileInterrupted.jump(21);mobileInterrupted.advance(100);mobileInterrupted.interrupt();
 assert.equal(mobileInterrupted.element.dataset.travelling,undefined);
@@ -211,23 +301,41 @@ console.log('PASS: mobile top-row highlight and preview select immediately in bo
 // Boundary crossings preserve sub-row position, update the correct period,
 // and recycle a fixed-size DOM rather than adding rows each lap.
 for (const mobile of [false,true]) for (const height of [400,600,900,1200,2200,4000]) {
-  const looping=createTable(height,0,false,mobile), h=looping.cycleHeight, count=looping.rows.length;
+  const looping=createTable(height,0,mobile,mobile), h=looping.cycleHeight, count=looping.rows.length;
   assert(count>=84);assert(count<=28*(2+Math.ceil(looping.element.clientHeight/h)) || count===84);
   assert.equal(looping.element.scrollTop,h);
-  looping.manual(2*h+12.25,false);
-  assert.equal(looping.element.scrollTop,h+12.25);assert.equal(looping.visibleWeeks.at(-1),0);assert.equal(looping.category,0);
-  looping.manual(h-12.25,false);
-  assert.equal(looping.element.scrollTop,2*h-12.25);assert.equal(looping.visibleWeeks.at(-1),27);assert.equal(looping.category,3);
-  if (mobile) assert.equal(looping.snapped,false,'a loop crossing remains unhighlighted until it lands');
+  if (mobile) {
+    looping.manual(2*h+40,false);
+    assert.equal(looping.element.scrollTop,2*h+40,'mobile momentum is not teleported while rows are moving');
+    assert.equal(looping.snapped,false);
+    looping.settle();looping.advance();
+    assert.equal(looping.element.scrollTop,h+57.5,'a rested detent rebases to its identical center row with room ahead');
+    looping.manual(h-40,false);
+    looping.settle();looping.advance();
+    assert.equal(looping.element.scrollTop,2*h-57.5,'upward movement also rebases to the center copy');
+  } else {
+    looping.manual(2*h+12.25,false);
+    assert.equal(looping.element.scrollTop,h+12.25);assert.equal(looping.visibleWeeks.at(-1),0);assert.equal(looping.category,0);
+    looping.manual(h-12.25,false);
+    assert.equal(looping.element.scrollTop,2*h-12.25);assert.equal(looping.visibleWeeks.at(-1),27);assert.equal(looping.category,3);
+  }
   for(let lap=0;lap<100;lap++) {
-    looping.manual(2*h+3.75,false);assert.equal(looping.element.scrollTop,h+3.75);
-    looping.manual(h-3.75,false);assert.equal(looping.element.scrollTop,2*h-3.75);
+    if (mobile) {
+      looping.manual(looping.element.scrollHeight-looping.element.clientHeight,false);
+      looping.settle();looping.advance();
+      assert(looping.element.scrollTop>=h && looping.element.scrollTop<2*h,'the physical bottom rebases to a reachable middle copy');
+      looping.manual(0,false);looping.settle();looping.advance();
+      assert.equal(looping.element.scrollTop,h,'the physical top rebases for upward infinite scrolling');
+    } else {
+      looping.manual(2*h+3.75,false);assert.equal(looping.element.scrollTop,h+3.75);
+      looping.manual(h-3.75,false);assert.equal(looping.element.scrollTop,2*h-3.75);
+    }
   }
   assert.equal(looping.rows.length,count,'scrolling must not grow the DOM');
   looping.jump(7);looping.advance();
   assert.equal(looping.element.scrollTop,looping.at(7).offsetTop);assert.equal(looping.category,1);
 }
-console.log('PASS: List loops seamlessly in both directions for 100 laps, preserves fractional offsets and mobile image direction, stays bounded, fills tall viewports and retains tab navigation after wrapping.');
+console.log('PASS: List loops in both directions for 100 laps, defers mobile recycling until the row settles, stays bounded, fills tall viewports and retains tab navigation after wrapping.');
 const directionLoop=createTable(852,0,false,true);
 directionLoop.manual(directionLoop.rows[27].offsetTop);
 assert.equal(directionLoop.preview.week,27);
@@ -241,14 +349,17 @@ for (const mobile of [false,true]) {
   keyboard.focus(56);
   // Native link focus scrolls the browser viewport; it no longer starts an
   // application-owned selection animation on mobile.
-  keyboard.manual(2*keyboard.cycleHeight);
-  assert.equal(keyboard.element.scrollTop,keyboard.cycleHeight);
+  keyboard.manual(mobile ? keyboard.element.scrollHeight-keyboard.element.clientHeight : 2*keyboard.cycleHeight);
+  if (mobile) { keyboard.settle(); keyboard.advance(); }
+  if (mobile) assert(keyboard.element.scrollTop>=keyboard.cycleHeight && keyboard.element.scrollTop<2*keyboard.cycleHeight);
+  else assert.equal(keyboard.element.scrollTop,keyboard.cycleHeight);
   assert.equal(keyboard.activeEntry,28,'focus transfers to the identical recycled row without scrolling');
   assert.equal(keyboard.focusedEntry,28);
-  assert.equal(keyboard.commands,0,'recycling link focus must not start a navigation animation');
-  if(mobile) {assert.equal(keyboard.preview.week,0); assert.equal(keyboard.category,0);}
+  assert.equal(keyboard.commands,mobile ? 1 : 0,'recycling link focus must not add an animation beyond the mobile row detent');
+  if(mobile) {assert.equal(keyboard.preview.week,keyboard.visibleWeeks.at(-1)); assert.equal(keyboard.category,Math.floor(keyboard.preview.week/7));}
   for(let lap=0;lap<5;lap++) {
     keyboard.manual(2*keyboard.cycleHeight+12.25,false);
+    if(mobile) { keyboard.settle();keyboard.advance(); }
     assert.equal(keyboard.activeEntry,28,'offscreen focused rows stay in the canonical cycle across multiple laps');
     assert.equal(keyboard.focusedEntry,28);
   }

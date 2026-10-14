@@ -1,7 +1,7 @@
 "use client";
 
 import { animate, AnimatePresence, motion, MotionConfig, useIsPresent, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, useTransform, type HTMLMotionProps, type MotionValue, type Transition } from "motion/react";
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode, type TouchEvent } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { preload } from "react-dom";
@@ -18,7 +18,7 @@ const MotionLink = motion.create(Link);
 
 const interfaceTransition = { type: "tween", duration: 0.68, ease: [0.22, 1, 0.36, 1] } satisfies Transition;
 const mobileRowHighlightTransition = { ...interfaceTransition, duration: 0.16 } satisfies Transition;
-const mobileRowPreviewTransition = { ...interfaceTransition, duration: 0.24 } satisfies Transition;
+const mobileRowSnapTransition = { ...interfaceTransition, duration: 0.22 } satisfies Transition;
 // Tab controls always use finite tweens: no inherited spring or momentum.
 const tabResizeTransition = { ...interfaceTransition, type: "tween" } satisfies Transition;
 const instantTabTransition = { type: "tween", duration: 0 } satisfies Transition;
@@ -295,6 +295,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const media = useRef<HTMLDivElement>(null);
   const navigation = useRef<{ stop: () => void } | null>(null);
   const travelling = useRef(false);
+  const travelCycle = useRef<number | null>(null);
   const writtenTop = useRef<number | null>(null);
   const focused = useRef<number | null>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
@@ -305,27 +306,33 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const targetY = useMotionValue(0);
   const y = useSpring(targetY, { stiffness: 500, damping: 40, mass: 0.7 });
   const previousJump = useRef<number | null>(null);
-  const rowGeometry = useRef<{ rows: HTMLElement[]; ends: number[]; cycleHeight: number; ready: boolean }>({ rows: [], ends: [], cycleHeight: 0, ready: false });
+  const rowGeometry = useRef<{ rows: HTMLElement[]; ends: number[]; cycleHeight: number; ready: boolean; highlightEntry: number; highlightHeight: number }>({ rows: [], ends: [], cycleHeight: 0, ready: false, highlightEntry: -1, highlightHeight: 0 });
   const indicated = useRef({ week: -1, period: -1 });
   const pointerFrame = useRef(0);
   const pendingPointer = useRef<{ scrolled: boolean; index?: number }>({ scrolled: false });
   const mobile = useMobileLayout();
   const [copies, setCopies] = useState(3);
-  const [mobileSnapped, setMobileSnapped] = useState(() => initialListLocation ? initialListLocation.offset < 0.001 : false);
+  const mobileSnapped = useRef(initialListLocation ? initialListLocation.offset < 0.001 : false);
+  const setMobileSnapped = (snapped: boolean) => { mobileSnapped.current = snapped; };
   const mobileSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelBusy = useRef(false);
   const listTouching = useRef(false);
   const previewEntry = useRef(weeks.length + jumpWeek);
   const recyclingFocus = useRef(false);
+  const mobileSnap = useRef<{ stop: () => void } | null>(null);
   const sizeMobileHighlight = useCallback((entry: number) => {
     if (!mobile) return;
-    const row = rowGeometry.current.rows[entry];
+    const geometry = rowGeometry.current;
+    const row = geometry.rows[entry];
     const scroll = viewport.current;
     const canvas = scroll?.parentElement;
     if (!row || !scroll || !canvas) return;
-    // The fixed selection covers only the part of the top row still visible.
-    // It shrinks on a downward swipe and expands on an upward swipe.
-    const visibleHeight = Math.max(0, Math.min(row.offsetHeight, row.offsetTop + row.offsetHeight - scroll.scrollTop));
-    const height = `${visibleHeight}px`;
+    // Keep one full-height selection slot under the fixed heading, even while
+    // rows move through it. The preview always names the top visible row.
+    const rowHeight = geometry.highlightEntry === entry ? geometry.highlightHeight : row.getBoundingClientRect().height;
+    geometry.highlightEntry = entry;
+    geometry.highlightHeight = rowHeight;
+    const height = `${rowHeight}px`;
     if (canvas.style.getPropertyValue("--mobile-top-row-height") !== height)
       canvas.style.setProperty("--mobile-top-row-height", height);
   }, [mobile]);
@@ -340,8 +347,9 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       // cover even a viewport taller than the whole year. DOM size is bounded.
       const needed = cycleHeight > 0 ? Math.max(3, 2 + Math.ceil(scroll.clientHeight / cycleHeight)) : 3;
       rowGeometry.current = {
-        rows, ends: rows.map(row => row.offsetTop + row.offsetHeight), cycleHeight,
+        rows, ends: rows.map((row, index) => rows[index + 1]?.offsetTop ?? row.offsetTop + row.offsetHeight), cycleHeight,
         ready: cycleHeight > 0 && rows.length >= needed * weeks.length,
+        highlightEntry: -1, highlightHeight: 0,
       };
       if (mobile && rowGeometry.current.ready) {
         const entry = rowGeometry.current.ends.findIndex(end => end > scroll.scrollTop + 0.5);
@@ -358,6 +366,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     cancelAnimationFrame(pointerFrame.current);
     pointerFrame.current = 0;
     if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+    mobileSnap.current?.stop();
   }, [active]);
 
   const recycle = useCallback(() => {
@@ -368,7 +377,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const cycle = Math.floor(top / cycleHeight);
     if (cycle === 1) return;
     // Identical rows replace identical rows at exactly the same pixel offset.
-    // Keep the fractional position (and native mobile snap targets) unchanged.
+    // Keep the fractional position unchanged across identical copies.
     scroll.scrollTop = top + (1 - cycle) * cycleHeight;
     writtenTop.current = scroll.scrollTop;
     const shift = (1 - cycle) * weeks.length;
@@ -385,6 +394,14 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     }
   }, [weeks.length]);
 
+  const stopMobileSnap = () => {
+    mobileSnap.current?.stop();
+    mobileSnap.current = null;
+    wheelBusy.current = false;
+    if (viewport.current) delete viewport.current.dataset.snapping;
+    writtenTop.current = null;
+  };
+
   const indicatePeriod = (settled = false) => {
     const scroll = viewport.current;
     const { rows, ends } = rowGeometry.current;
@@ -394,8 +411,9 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const period = periodForWeek(week);
     const aligned = Math.abs(scroll.scrollTop - rows[index].offsetTop) <= 1;
     if (mobile) {
-      setMobileSnapped(settled && aligned);
+      const snapped = settled && aligned;
       sizeMobileHighlight(index);
+      setMobileSnapped(snapped);
       // The single mobile image retargets with the selected top row. Its short
       // Motion entrance never leaves a queue of old images after a fast flick.
       if (previewEntry.current !== index || !visible.current) show(index);
@@ -409,6 +427,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     navigation.current?.stop();
     navigation.current = null;
     travelling.current = false;
+    travelCycle.current = null;
     writtenTop.current = null;
     if (viewport.current) delete viewport.current.dataset.travelling;
     recycle();
@@ -459,34 +478,101 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   }, [active, mobile, reducedMotion, targetY, y, weeks.length]);
 
   const settleMobileList = () => {
-    if (!mobile || !active || travelling.current || listTouching.current) return;
+    if (!mobile || !active || travelling.current || listTouching.current || mobileSnap.current || wheelBusy.current) return;
     const scroll = viewport.current;
     if (!scroll || !rowGeometry.current.ready) return;
     if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
     mobileSettleTimer.current = null;
-    // Proximity snapping belongs to the browser. Do not pull a free-scrolling
-    // list to the next row after momentum has ended.
-    recycle();
-    indicatePeriod(true);
+    // A late scrollend from a tab trip or the previous detent is not new
+    // momentum. Re-selecting it would recycle an already landed tab on Safari.
+    if (writtenTop.current !== null && Math.abs(scroll.scrollTop - writtenTop.current) < 0.5) return;
+    const { rows, ends } = rowGeometry.current;
+    const first = ends.findIndex(end => end > scroll.scrollTop);
+    const current = first < 0 ? rows.length - 1 : first;
+    const next = Math.min(current + 1, rows.length - 1);
+    const maxTop = scroll.scrollHeight - scroll.clientHeight;
+    let index = Math.abs(rows[current].offsetTop - scroll.scrollTop) <= Math.abs(rows[next].offsetTop - scroll.scrollTop) ? current : next;
+    // The final rows of the last repeated year cannot reach the header line:
+    // the viewport ends first. Pick the last reachable detent, then recycle.
+    while (index > 0 && rows[index].offsetTop > maxTop) index--;
+    const target = rows[index].offsetTop;
+    const finish = () => {
+      scroll.scrollTop = target;
+      writtenTop.current = scroll.scrollTop;
+      mobileSnap.current = null;
+      // Rebase an outer copy only after the row is at rest, while overflow is
+      // locked. The next gesture begins in the middle copy with room in both
+      // directions, instead of stalling at the physical end of the List.
+      recycle();
+      indicatePeriod(true);
+      // The hidden-overflow interval cancels the previous momentum. Release
+      // it immediately so the first new wheel or touch gesture can scroll.
+      delete scroll.dataset.snapping;
+    };
+    if (reducedMotion || Math.abs(target - scroll.scrollTop) < 0.5) {
+      if (Math.floor(target / rowGeometry.current.cycleHeight) !== 1)
+        scroll.dataset.snapping = "true";
+      finish();
+      return;
+    }
+    // Safari's native snap and script-driven recycling used to fight over the
+    // destination. Let native momentum finish, then make one Motion detent.
+    scroll.dataset.snapping = "true";
+    mobileSnap.current = animate(scroll.scrollTop, target, {
+      ...mobileRowSnapTransition,
+      onUpdate: value => {
+        scroll.scrollTop = value;
+        writtenTop.current = scroll.scrollTop;
+      },
+      onComplete: finish,
+    });
+  };
+
+  const queueMobileSettle = () => {
+    if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+    mobileSettleTimer.current = setTimeout(() => {
+      mobileSettleTimer.current = null;
+      wheelBusy.current = false;
+      settleMobileList();
+    }, 170);
   };
 
   const goToWeek = useCallback((index: number, immediate = false, entry?: number) => {
     const scroll = viewport.current;
     const { rows, cycleHeight, ready } = rowGeometry.current;
     if (!active || !scroll || !ready) return;
-    const cycle = immediate ? 1 : Math.floor(scroll.scrollTop / cycleHeight);
-    const destination = entry ?? cycle * weeks.length + index;
-    const row = rows[destination];
-    if (!row) return;
+    stopMobileSnap();
+    const continuingCycle = travelCycle.current;
     navigation.current?.stop();
     navigation.current = null;
     travelling.current = false;
+    // A second tab click inherits the first trip's repeated year. Sampling
+    // scrollTop mid-trip can cross a cycle boundary and send the next click
+    // backwards through an identical copy of the rows.
+    let cycle = immediate ? 1 : continuingCycle ?? Math.floor(scroll.scrollTop / cycleHeight);
+    let destination = entry ?? cycle * weeks.length + index;
+    const maxTop = scroll.scrollHeight - scroll.clientHeight;
+    if (mobile && !immediate && rows[destination]?.offsetTop > maxTop &&
+      Math.floor(scroll.scrollTop / cycleHeight) > 1) {
+      // The last repeated year cannot fit every row under the header. Move
+      // its identical current row to the center before the visible tab trip,
+      // so selecting a later period still travels forward through the weeks.
+      recycle();
+      cycle = Math.floor(scroll.scrollTop / cycleHeight);
+      destination = entry ?? cycle * weeks.length + index;
+    }
+    // A row near the physical end of the final copy cannot reach the header.
+    // Use its identical row one cycle earlier for tab navigation.
+    while (destination >= weeks.length && rows[destination]?.offsetTop > maxTop)
+      destination -= weeks.length;
+    travelCycle.current = Math.floor(destination / weeks.length);
+    const row = rows[destination];
+    if (!row) return;
     if (mobile) {
       if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
       setMobileSnapped(false);
     }
-    // Native proximity snapping is suspended during Motion travel so Safari cannot snap
-    // individual writes to another row. Restore it at the exact destination.
+    // Mark tab travel so its own scroll writes cannot trigger a row selection.
     scroll.dataset.travelling = "true";
     const target = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, row.offsetTop));
     const write = (value: number) => {
@@ -494,15 +580,22 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       writtenTop.current = scroll.scrollTop;
     };
     const finish = () => {
+      write(target);
       travelling.current = false;
+      travelCycle.current = null;
       navigation.current = null;
-      recycle();
+      // Keep a mobile tab trip in the copy it visibly reached. Replacing that
+      // copy at the final frame is a one-year compositor jump in Safari.
+      // Only the physical top needs an immediate rebase for upward scrolling.
+      if (!mobile || scroll.scrollTop < 0.5) recycle();
       delete scroll.dataset.travelling;
       indicated.current.week = index;
       onWeekChange(index);
       if (mobile) {
-        sizeMobileHighlight(weeks.length + index);
-        show(weeks.length + index);
+        const landing = rowGeometry.current.ends.findIndex(end => end > scroll.scrollTop + 0.5);
+        const entryIndex = landing < 0 ? destination : landing;
+        sizeMobileHighlight(entryIndex);
+        show(entryIndex);
         setMobileSnapped(true);
       }
     };
@@ -521,9 +614,11 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         if (indicated.current.week !== next) {
           indicated.current.week = next;
           onWeekChange(next);
-          if (mobile) sizeMobileHighlight(entry);
         }
-        if (mobile && (previewEntry.current !== entry || !visible.current)) show(entry);
+        if (mobile) {
+          sizeMobileHighlight(entry);
+          if (previewEntry.current !== entry || !visible.current) show(entry);
+        }
       },
       onComplete: finish,
     });
@@ -532,6 +627,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       controls.stop();
       if (navigation.current === controls) {
         travelling.current = false; navigation.current = null;
+        // React runs this cleanup before the next tab command. Keep its cycle
+        // for that command; direct input clears it in interruptTravel instead.
         delete scroll.dataset.travelling;
       }
     };
@@ -593,18 +690,47 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       const scroll = viewport.current;
       if (scroll && scrolled && (writtenTop.current === null || Math.abs(scroll.scrollTop - writtenTop.current) > 0.5)) {
         writtenTop.current = null;
-        if (!travelling.current) recycle();
+        // Repositioning the repeated year during iOS momentum repaints rows
+        // against the moving scroll layer. Recycle only after its final detent.
+        if (!travelling.current && !mobile) recycle();
         indicatePeriod();
         if (mobile && !travelling.current) {
-          if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
-          mobileSettleTimer.current = setTimeout(settleMobileList, 120);
+          queueMobileSettle();
         }
       }
       if (!scrolled && index !== undefined && pointer.current) show(index, pointer.current.y);
       else trackPointer();
     });
   };
-  const handleScroll = () => schedulePointer(true);
+  const handleScroll = () => {
+    const scroll = viewport.current;
+    // Remove the selected surface on the first real scroll event, before the
+    // batched row/period work runs. Ignore our own tab-travel writes.
+    if (mobile && !travelling.current && !mobileSnap.current && scroll &&
+      (writtenTop.current === null || Math.abs(scroll.scrollTop - writtenTop.current) > 0.5))
+      setMobileSnapped(false);
+    schedulePointer(true);
+  };
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    interruptTravel();
+    if (mobile) {
+      stopMobileSnap();
+      setMobileSnapped(false);
+      const scroll = viewport.current;
+      if (scroll && ((event.deltaY > 0 && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1) ||
+        (event.deltaY < 0 && scroll.scrollTop <= 1))) {
+        // A wheel at the physical edge would be clamped and emit no scroll
+        // event. Move to identical pixels in the middle copy before the
+        // browser applies this wheel delta, so continuous input keeps moving.
+        recycle();
+        writtenTop.current = null;
+      }
+      wheelBusy.current = true;
+      // At the physical edge a wheel event can be clamped with no scroll
+      // event. It still needs a detent/rebase or the List feels stuck.
+      queueMobileSettle();
+    }
+  };
 
   const captureListPosition = () => {
     const scroll = viewport.current;
@@ -627,14 +753,15 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       <div className={styles.tableHeading} aria-hidden><span>Week</span><span>Title</span></div>
     </motion.div>
     <motion.div className={styles.mobileTopRowHighlight} aria-hidden initial={false}
-      animate={{ opacity: preview.visible ? mobileSnapped ? 1 : 0.5 : 0 }}
+      animate={{ opacity: preview.visible && active ? 1 : 0 }}
       transition={reducedMotion ? { duration: 0 } : mobileRowHighlightTransition} />
-    <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onScrollEnd={settleMobileList} onWheel={interruptTravel}
-      onTouchStart={() => { listTouching.current = true; interruptTravel(); }}
-      onTouchEnd={() => { listTouching.current = false; if (mobile) { if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current); mobileSettleTimer.current = setTimeout(settleMobileList, 120); } }}
+    <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onScrollEnd={settleMobileList}
+      onWheel={handleWheel}
+      onTouchStart={() => { listTouching.current = true; if (mobile) { stopMobileSnap(); setMobileSnapped(false); } interruptTravel(); }}
+      onTouchEnd={() => { listTouching.current = false; if (mobile) queueMobileSettle(); }}
       onTouchCancel={() => { listTouching.current = false; if (mobile) settleMobileList(); }}
       onKeyDownCapture={event => {
-        if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) interruptTravel();
+        if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) { stopMobileSnap(); interruptTravel(); }
       }}>
     <motion.div className={styles.tableContent} variants={screenReveal(reducedMotion, mobile ? 0 : 32, revealStep)}>
       <div ref={table} className={styles.weekTable}>
@@ -658,19 +785,16 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       </div>
     </motion.div>
     </div>
-    <motion.div ref={media} aria-hidden className={styles.rowPreview} style={{ y: mobile ? 0 : reducedMotion ? targetY : y }}>
+    <div className={styles.rowPreviewViewport} aria-hidden>
+    <motion.div ref={media} className={styles.rowPreview} style={{ y: mobile ? 0 : reducedMotion ? targetY : y }}>
       <div className={styles.rowPreviewMask} data-smooth-corners="0.6">
         <motion.div className={styles.rowPreviewReveal} initial={false}
           style={reducedMotion ? { opacity: preview.visible && active ? 1 : 0, clipPath: "inset(0%)" } : undefined}
           animate={reducedMotion ? undefined : { opacity: preview.visible && active ? 1 : 0, clipPath: preview.visible && active ? "inset(0% 0% 0% 0%)" : "inset(50% 0% 50% 0%)" }}
           transition={interfaceTransition}>
-          {mobile ? <motion.div key={preview.week} className={styles.rowPreviewImage} data-smooth-corners="0.6" custom={preview.direction}
-            style={reducedMotion ? { y: 0 } : undefined}
-            variants={maskedText} initial={reducedMotion || !preview.visible ? false : "enter"}
-            animate={reducedMotion ? undefined : "visible"}
-            transition={mobileRowPreviewTransition}>
+          {mobile ? <div className={styles.rowPreviewImage} data-smooth-corners="0.6">
             <PreviewImage week={preview.week} />
-          </motion.div> : <AnimatePresence initial={false} custom={preview.direction}>
+          </div> : <AnimatePresence initial={false} custom={preview.direction}>
             <motion.div key={preview.week} className={styles.rowPreviewImage} data-smooth-corners="0.6" custom={preview.direction}
               style={reducedMotion ? { y: 0 } : undefined}
               variants={maskedText} initial={reducedMotion ? false : "enter"}
@@ -682,6 +806,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         </motion.div>
       </div>
     </motion.div>
+    </div>
     </div>
   </div>;
 });
@@ -849,6 +974,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       ready.current = false;
       travelling.current = false;
       position.stop();
+      delete element.dataset.travelling;
       resize.disconnect();
       if (settleTimer.current) clearTimeout(settleTimer.current);
     };
@@ -862,6 +988,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       if (settleTimer.current) clearTimeout(settleTimer.current);
       travelling.current = false;
       position.stop();
+      if (viewport.current) delete viewport.current.dataset.travelling;
       return;
     }
     const jumpRequested = handledJump.current !== jumpVersion;
@@ -881,7 +1008,10 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       lastPosition.current = next;
       inputPosition.jump(next);
       position.jump(next);
-      if (viewport.current) viewport.current.scrollTop = next * scrollStep.current;
+      if (viewport.current) {
+        delete viewport.current.dataset.travelling;
+        viewport.current.scrollTop = next * scrollStep.current;
+      }
       return;
     }
     // Stay in the current school-year cycle, rather than taking a wraparound
@@ -891,13 +1021,18 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     const target = cycle + jumpWeek;
     cycleOrigin.current = cycle - weeks.length;
     inputPosition.set(from);
-    if (viewport.current) viewport.current.scrollTop = (from - cycleOrigin.current) * scrollStep.current;
     travelling.current = true;
+    if (viewport.current) {
+      // End native wheel momentum before Motion owns this scroll position.
+      viewport.current.dataset.travelling = "true";
+      viewport.current.scrollTop = (from - cycleOrigin.current) * scrollStep.current;
+    }
     if (reducedMotion || Math.abs(target - from) < 0.001) {
       position.set(target);
       inputPosition.set(target);
       if (viewport.current) viewport.current.scrollTop = (target - cycleOrigin.current) * scrollStep.current;
       travelling.current = false;
+      if (viewport.current) delete viewport.current.dataset.travelling;
       onPeriodChange(periodForWeek(jumpWeek));
       return;
     }
@@ -905,6 +1040,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       ...tabNavigationTransition(target - from),
       onComplete: () => {
         travelling.current = false;
+        if (viewport.current) delete viewport.current.dataset.travelling;
         onPeriodChange(periodForWeek(jumpWeek));
       },
     });
@@ -991,6 +1127,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     const current = position.get();
     inputPosition.set(current);
     if (viewport.current) viewport.current.scrollTop = (current - cycleOrigin.current) * scrollStep.current;
+    if (viewport.current) delete viewport.current.dataset.travelling;
     onPeriodChange(periodForWeek(wrapWeek(Math.round(current), weeks.length)));
   };
 
