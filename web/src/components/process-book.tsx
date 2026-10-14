@@ -1,7 +1,7 @@
 "use client";
 
-import { animate, AnimatePresence, motion, MotionConfig, useIsPresent, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, useTransform, type HTMLMotionProps, type MotionValue, type Transition } from "motion/react";
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react";
+import { animate, AnimatePresence, motion, MotionConfig, stagger, useIsPresent, useMotionValue, useMotionValueEvent, useReducedMotion, useSpring, useTransform, type HTMLMotionProps, type MotionValue, type Transition } from "motion/react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode, type TouchEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { preload } from "react-dom";
@@ -9,6 +9,7 @@ import styles from "./process-book.module.css";
 import { useSmoothCorners } from "./use-smooth-corners";
 import { useTabWidths } from "./use-tab-widths";
 import { useMobileLayout } from "./use-mobile-layout";
+import { pulseSelectionHaptic } from "./selection-haptics";
 import { SwitcherSurface, switcherClip } from "./switcher-surface";
 import { ProcessBookProvider, useProcessBookContent } from "./process-book-content";
 import { resolveBookPosition, saveBookPosition, useProcessBookHistory, type ListLocation } from "./process-book-history";
@@ -18,7 +19,8 @@ const MotionLink = motion.create(Link);
 
 const interfaceTransition = { type: "tween", duration: 0.68, ease: [0.22, 1, 0.36, 1] } satisfies Transition;
 const mobileRowHighlightTransition = { ...interfaceTransition, duration: 0.16 } satisfies Transition;
-const mobileRowSnapTransition = { ...interfaceTransition, duration: 0.22 } satisfies Transition;
+const mobileRowSnapTransition = { ...interfaceTransition, duration: 0.16 } satisfies Transition;
+const mobileRowSettleDelay = 80;
 // Tab controls always use finite tweens: no inherited spring or momentum.
 const tabResizeTransition = { ...interfaceTransition, type: "tween" } satisfies Transition;
 const instantTabTransition = { type: "tween", duration: 0 } satisfies Transition;
@@ -32,6 +34,23 @@ const exploreCursorContentTransition = { type: "tween", ease: "easeOut", duratio
 const railTextTransition = { ...interfaceTransition, duration: 0.36 } satisfies Transition;
 const screenTransition = { ...interfaceTransition, duration: 1 } satisfies Transition;
 const revealStep = 0.12;
+const listRowStagger = 0.035;
+const listRowRevealCount = 18;
+const listRowEnterDelay = stagger(listRowStagger, { startDelay: revealStep });
+const listRowExitDelay = stagger(listRowStagger, { from: "last" });
+
+// The repeated List rows are scroll geometry, so only text in the opening
+// viewport takes part in the screen change. Rows beyond it stay ready to scroll.
+function listRowReveal(reducedMotion: boolean | null, order: number) {
+  const transition = (delay: number): Transition => reducedMotion ? { duration: 0, delay: 0 } :
+    { ...interfaceTransition, duration: 0.55, delay };
+  const hidden = { y: reducedMotion ? 0 : 16, opacity: 0 };
+  return {
+    enter: { ...hidden, transition: transition(0) },
+    visible: { y: 0, opacity: 1, transition: transition(listRowEnterDelay(order, listRowRevealCount)) },
+    exit: { ...hidden, transition: transition(listRowExitDelay(order, listRowRevealCount)) },
+  };
+}
 
 // Shared endpoints make an interrupted entrance/exit reverse from its current state.
 function screenReveal(reducedMotion: boolean | null, offset: number | string, enterDelay = 0, exitDelay = 0, mask = false) {
@@ -44,12 +63,21 @@ function screenReveal(reducedMotion: boolean | null, offset: number | string, en
   };
 }
 
-const screenStates = { enter: {}, visible: {}, exit: {} };
+// AnimatePresence must retain the outgoing panel until the shared field has
+// travelled its full viewport width. The flat opacity keyframes provide a
+// timeline without adding a second visible fade to the child animations.
+const screenStates = {
+  enter: {},
+  visible: {},
+  exit: { opacity: [1, 1], transition: { duration: screenTransition.duration } },
+};
+const reducedScreenStates = { enter: {}, visible: {}, exit: { transition: { duration: 0 } } };
 
 function ScreenPanel({ left, label, startVisible, children }: { left: string; label: string; startVisible?: boolean; children: ReactNode }) {
   const present = useIsPresent();
+  const reducedMotion = useReducedMotion();
   return <motion.section className={styles.screenPanel} style={{ left }} aria-label={label}
-    aria-hidden={!present} inert={!present} variants={screenStates} initial={startVisible ? false : "enter"} animate="visible" exit="exit">
+    aria-hidden={!present} inert={!present} variants={reducedMotion ? reducedScreenStates : screenStates} initial={startVisible ? false : "enter"} animate="visible" exit="exit">
     {children}
   </motion.section>;
 }
@@ -260,20 +288,23 @@ const TablePeriodHeading = memo(function TablePeriodHeading({ period, reducedMot
 
 // Only the previous and next hovered rows change; the other rows retain their
 // buttons, image-independent markup, and handlers during preview animations.
-const TableRow = memo(function TableRow({ index, entryIndex, preview, onFocus, onBlur }: {
-  index: number; entryIndex: number; preview: boolean;
+const TableRow = memo(function TableRow({ index, entryIndex, preview, revealOrder = -1, reducedMotion = null, onFocus, onBlur }: {
+  index: number; entryIndex: number; preview: boolean; revealOrder?: number; reducedMotion?: boolean | null;
   onFocus: (week: number) => void; onBlur: () => void;
 }) {
   const { weeks } = useProcessBookContent();
   const entry = weeks[index];
   const [prefetch, setPrefetch] = useState(false);
+  const reveal = revealOrder >= 0 && revealOrder < listRowRevealCount ? listRowReveal(reducedMotion, revealOrder) : null;
   return <div role="row" className={styles.tableRow} data-table-week={index} data-table-entry={entryIndex} data-preview={preview}>
-    <span role="cell" className={styles.tableWeek}><span className={styles.number}>{entry.number}</span></span>
+    <span role="cell" className={styles.tableWeek}>{reveal
+      ? <motion.span className={styles.number} variants={reveal}>{entry.number}</motion.span>
+      : <span className={styles.number}>{entry.number}</span>}</span>
     <span role="cell"><Link href={entry.href} prefetch={prefetch} className={styles.rowButton}
       onMouseEnter={() => setPrefetch(true)} onTouchStart={() => setPrefetch(true)}
       onFocus={() => { setPrefetch(true); onFocus(entryIndex); }} onBlur={onBlur}
       aria-label={`Explore week ${entry.number}: ${entry.title}`}>
-      <span>{entry.title}</span>
+      {reveal ? <motion.span variants={reveal}>{entry.title}</motion.span> : <span>{entry.title}</span>}
     </Link></span>
   </div>;
 });
@@ -306,6 +337,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const targetY = useMotionValue(0);
   const y = useSpring(targetY, { stiffness: 500, damping: 40, mass: 0.7 });
   const previousJump = useRef<number | null>(null);
+  const lastSettledWeek = useRef(initialListLocation?.week ?? jumpWeek);
   const rowGeometry = useRef<{ rows: HTMLElement[]; ends: number[]; cycleHeight: number; ready: boolean; highlightEntry: number; highlightHeight: number }>({ rows: [], ends: [], cycleHeight: 0, ready: false, highlightEntry: -1, highlightHeight: 0 });
   const indicated = useRef({ week: -1, period: -1 });
   const pointerFrame = useRef(0);
@@ -505,6 +537,11 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       // directions, instead of stalling at the physical end of the List.
       recycle();
       indicatePeriod(true);
+      const week = Number(rows[index].dataset.tableWeek);
+      if (week !== lastSettledWeek.current) {
+        lastSettledWeek.current = week;
+        pulseSelectionHaptic();
+      }
       // The hidden-overflow interval cancels the previous momentum. Release
       // it immediately so the first new wheel or touch gesture can scroll.
       delete scroll.dataset.snapping;
@@ -534,7 +571,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       mobileSettleTimer.current = null;
       wheelBusy.current = false;
       settleMobileList();
-    }, 170);
+    }, mobileRowSettleDelay);
   };
 
   const goToWeek = useCallback((index: number, immediate = false, entry?: number) => {
@@ -591,6 +628,10 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       delete scroll.dataset.travelling;
       indicated.current.week = index;
       onWeekChange(index);
+      if (mobile && index !== lastSettledWeek.current) {
+        lastSettledWeek.current = index;
+        if (!immediate) pulseSelectionHaptic();
+      }
       if (mobile) {
         const landing = rowGeometry.current.ends.findIndex(end => end > scroll.scrollTop + 0.5);
         const entryIndex = landing < 0 ? destination : landing;
@@ -648,6 +689,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         viewport.current.scrollTop = row.offsetTop + row.offsetHeight * initialListLocation.offset;
         writtenTop.current = viewport.current.scrollTop;
         indicated.current.week = initialListLocation.week;
+        lastSettledWeek.current = initialListLocation.week;
         indicated.current.period = periodForWeek(initialListLocation.week);
         if (mobile) {
           sizeMobileHighlight(weeks.length + initialListLocation.week);
@@ -704,24 +746,40 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   };
   const handleScroll = () => {
     const scroll = viewport.current;
+    const nativeScroll = scroll && (writtenTop.current === null || Math.abs(scroll.scrollTop - writtenTop.current) > 0.5);
     // Remove the selected surface on the first real scroll event, before the
     // batched row/period work runs. Ignore our own tab-travel writes.
-    if (mobile && !travelling.current && !mobileSnap.current && scroll &&
-      (writtenTop.current === null || Math.abs(scroll.scrollTop - writtenTop.current) > 0.5))
+    if (mobile && !travelling.current && !mobileSnap.current && nativeScroll && scroll) {
       setMobileSnapped(false);
+      const { cycleHeight, ready } = rowGeometry.current;
+      if (ready) {
+        // A long uninterrupted flick can cross the whole outer copy. Rebase
+        // before the native scroller clamps, but only near its physical edge;
+        // ordinary momentum still runs without a scripted scrollTop write.
+        const guard = Math.min(cycleHeight / 4, scroll.clientHeight / 2);
+        if (scroll.scrollTop < guard || scroll.scrollTop > scroll.scrollHeight - scroll.clientHeight - guard) {
+          const before = scroll.scrollTop;
+          recycle();
+          if (scroll.scrollTop !== before) {
+            writtenTop.current = null;
+            indicatePeriod();
+            queueMobileSettle();
+          }
+        }
+      }
+    }
     schedulePointer(true);
   };
-  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+  const handleWheel = () => {
     interruptTravel();
     if (mobile) {
       stopMobileSnap();
       setMobileSnapped(false);
       const scroll = viewport.current;
-      if (scroll && ((event.deltaY > 0 && scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1) ||
-        (event.deltaY < 0 && scroll.scrollTop <= 1))) {
-        // A wheel at the physical edge would be clamped and emit no scroll
-        // event. Move to identical pixels in the middle copy before the
-        // browser applies this wheel delta, so continuous input keeps moving.
+      if (scroll) {
+        // Rebase before the browser applies this delta, not after it reaches
+        // a clamped edge. An outer copy can be entered by a tab trip or a
+        // fast wheel gesture; the matching middle row has room either way.
         recycle();
         writtenTop.current = null;
       }
@@ -730,6 +788,16 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       // event. It still needs a detent/rebase or the List feels stuck.
       queueMobileSettle();
     }
+  };
+
+  const beginListTouch = () => {
+    listTouching.current = true;
+    if (mobile) { stopMobileSnap(); setMobileSnapped(false); }
+    interruptTravel();
+    // iOS stops the previous momentum at touchstart. This is the safe point
+    // to move an identical outer-copy row to the middle before a new swipe;
+    // waiting for scrollend can leave the first gesture clamped at the edge.
+    if (mobile) recycle();
   };
 
   const captureListPosition = () => {
@@ -757,7 +825,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       transition={reducedMotion ? { duration: 0 } : mobileRowHighlightTransition} />
     <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onScrollEnd={settleMobileList}
       onWheel={handleWheel}
-      onTouchStart={() => { listTouching.current = true; if (mobile) { stopMobileSnap(); setMobileSnapped(false); } interruptTravel(); }}
+      onTouchStart={beginListTouch}
       onTouchEnd={() => { listTouching.current = false; if (mobile) queueMobileSettle(); }}
       onTouchCancel={() => { listTouching.current = false; if (mobile) settleMobileList(); }}
       onKeyDownCapture={event => {
@@ -778,6 +846,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
             }}>
             {Array.from({ length: copies * weeks.length }, (_, entry) => <TableRow key={entry}
               index={entry % weeks.length} entryIndex={entry}
+              revealOrder={entry - (weeks.length + (initialListLocation?.week ?? jumpWeek))}
+              reducedMotion={reducedMotion}
               preview={!mobile && preview.visible && preview.week === entry % weeks.length}
               onFocus={focusWeek} onBlur={blurWeek} />)}
           </div>
@@ -922,6 +992,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
   const viewport = useRef<HTMLDivElement>(null);
   const stack = useRef<HTMLDivElement>(null);
   const currentWeek = useRef(week);
+  const lastSettledWeek = useRef(week);
   const ready = useRef(false);
   const measuredHeight = useRef(0);
   const scrollStep = useRef(180);
@@ -1003,6 +1074,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     travelling.current = false;
     if (firstPlacement) {
       currentWeek.current = week;
+      lastSettledWeek.current = week;
       cycleOrigin.current = 0;
       const next = weeks.length + week;
       lastPosition.current = next;
@@ -1034,6 +1106,10 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       travelling.current = false;
       if (viewport.current) delete viewport.current.dataset.travelling;
       onPeriodChange(periodForWeek(jumpWeek));
+      if (mobile && jumpWeek !== lastSettledWeek.current) {
+        lastSettledWeek.current = jumpWeek;
+        pulseSelectionHaptic();
+      }
       return;
     }
     animate(position, target, {
@@ -1042,9 +1118,13 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
         travelling.current = false;
         if (viewport.current) delete viewport.current.dataset.travelling;
         onPeriodChange(periodForWeek(jumpWeek));
+        if (mobile && jumpWeek !== lastSettledWeek.current) {
+          lastSettledWeek.current = jumpWeek;
+          pulseSelectionHaptic();
+        }
       },
     });
-  }, [active, week, jumpWeek, jumpVersion, reducedMotion, inputPosition, position, onPeriodChange, periodForWeek, weeks.length]);
+  }, [active, week, jumpWeek, jumpVersion, reducedMotion, inputPosition, position, onPeriodChange, periodForWeek, mobile, weeks.length]);
 
   useMotionValueEvent(position, "change", latest => {
     if (!active) return;
@@ -1066,8 +1146,16 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     lastPosition.current = latest;
   });
 
+  const signalSettledWeek = () => {
+    if (!mobile || !active) return;
+    const settled = wrapWeek(Math.round(position.get()), weeks.length);
+    if (settled === lastSettledWeek.current) return;
+    lastSettledWeek.current = settled;
+    pulseSelectionHaptic();
+  };
+
   const movePosition = (target: number, landing = false, gestureVelocity?: number) => {
-    if (reducedMotion) { position.jump(target); return; }
+    if (reducedMotion) { position.jump(target); if (landing) signalSettledWeek(); return; }
     const distance = target - position.get();
     // Carry motion into the landing without letting momentum cross the chosen
     // card. The velocity cap stays below this spring's no-overshoot threshold.
@@ -1076,7 +1164,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       Math.max(0, (gestureVelocity ?? position.getVelocity()) * Math.sign(distance)),
       Math.abs(distance) * railSwipeVelocityLimit,
     );
-    animate(position, target, landing ? { ...railSnapSpring, velocity } : railSpring);
+    animate(position, target, landing ? { ...railSnapSpring, velocity, onComplete: signalSettledWeek } : railSpring);
   };
 
   const rebase = () => {
@@ -1145,6 +1233,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
         ...railMomentumTransition,
         velocity: gestureVelocity,
         modifyTarget: projected => projectedRailTarget(current, projected, direction, weeks.length),
+        onComplete: signalSettledWeek,
       });
     } else movePosition(target, true, gestureVelocity);
     element.scrollTo({ top: (target - cycleOrigin.current) * scrollStep.current, behavior: "instant" });
@@ -1430,12 +1519,12 @@ function ProcessBookApp() {
         <CategoryTabs selected={selected} onSelect={select} />
 
         <div className={styles.content}>
-          <motion.div className={styles.screenField} initial={false} animate={{ x: `${screen * -100}%` }} transition={reducedMotion ? { duration: 0 } : screenTransition}>
+          <motion.div className={styles.screenField} initial={false} animate={{ x: screen ? "-100vw" : "0vw" }} transition={reducedMotion ? { duration: 0 } : screenTransition}>
           <AnimatePresence mode="sync" initial={!reducedMotion && !returning}>
           {view === "scroll" ? <ScreenPanel key="scroll" left="0%" label="All school weeks, scroll view" startVisible={returning}>
               <WeekScrollView active week={week} jumpWeek={jumpWeek} jumpVersion={jumpVersion} onWeekChange={changeWeek} onPeriodChange={setSelected} onNavigate={saveBeforeNavigate} cursorActive={cursor} cardPointerHandlers={cardPointerHandlers} startVisible={returning} />
           </ScreenPanel> : null}
-          {view === "table" ? <ScreenPanel key="table" left="100%" label="All school weeks, list view" startVisible={returning}>
+          {view === "table" ? <ScreenPanel key="table" left="calc(100% + 16px)" label="All school weeks, list view" startVisible={returning}>
               <WeekTableView active category={selected} jumpWeek={jumpWeek} jumpVersion={jumpVersion}
                 initialListLocation={initial.view === "table" && jumpVersion === 0 ? initial.list : null}
                 onWeekChange={setWeek} onNavigate={saveBeforeNavigate}

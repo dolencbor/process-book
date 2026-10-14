@@ -14,7 +14,7 @@ const springEnd = source.indexOf('\n\nconst categories', springStart);
 const js = ts.transpile(source.slice(springStart, springEnd) + '\n' + source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
 function createRail(initialWeek = 0, reduced = false, mobile = false) {
   const hooks = [], effects = [], subscriptions = [];
-  let index = 0, animation = null, commands = 0, props, now = 0;
+  let index = 0, animation = null, commands = 0, props, now = 0, haptics = 0;
   const seen = [], periods = [], resizeCallbacks = []; let selected = Math.floor(initialWeek / 7);
   const element = { clientHeight: 900, scrollTop: 0, dataset: {}, style: { setProperty() {} }, scrollTo({top}) { this.scrollTop = top; }, focus() {} };
   const cards = { clientWidth: 530 };
@@ -51,6 +51,7 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
     wrapWeek: n => ((n % 28) + 28) % 28,
     periodForWeek: n => Math.floor(n / 7),
     railRevealDistance: 4,
+    pulseSelectionHaptic: () => { haptics++; },
     interfaceTransition: { type: 'tween', duration: .68, ease: [.22, 1, .36, 1] },
     Date: { now: () => now },
     ResizeObserver: class { constructor(callback) { resizeCallbacks.push(callback); } observe() {} disconnect() {} }, setTimeout, clearTimeout,
@@ -73,7 +74,7 @@ function createRail(initialWeek = 0, reduced = false, mobile = false) {
     tick(ms) { now += ms; },
     get selected() { return selected; },
     resize(height) { if (height) element.clientHeight = height; resizeCallbacks.forEach(fn => fn()); render(); },
-    get commands() { return commands; }, get animation() { return animation; },
+    get commands() { return commands; }, get animation() { return animation; }, get haptics() { return haptics; },
     jump(week) { selected = Math.floor(week / 7); props.jumpWeek = week; props.jumpVersion++; return render(); },
     advance(ms = 10000) {
       const a = animation;
@@ -220,7 +221,9 @@ for (const [week, direction, expected] of [[26, 1, [27, 0, 1]], [0, -1, [27, 26,
   assert.equal(rail.animation.options.modifyTarget(rail.animation.value.get() + rail.animation.options.velocity * rail.animation.options.power),
     rail.animation.target, 'Motion quantizes the projected inertia target to the same selected week');
   assert.equal(rail.element.scrollTop, rail.animation.target * 180, 'native scroll and the visual destination agree');
+  assert.equal(rail.haptics, 0, 'intermediate weeks do not buzz during a flick');
   rail.advance(2000);
+  assert.equal(rail.haptics, 1, 'only the final card detent gives one tactile cue');
   assert.deepEqual(rail.seen, expected, 'all intervening weeks remain visible across the loop seam');
   assert.equal(rail.animation.value.get(), rail.animation.target, 'inertia lands exactly on its snapped week');
 }
@@ -262,5 +265,6 @@ reducedDrag.tick(30);
 reducedDrag.handlers().endTouch({ changedTouches: [{ clientX: 200, clientY: 240 }] });
 assert.equal(reducedDrag.commands, 0, 'reduced motion jumps directly to the selected week');
 assert.equal(reducedDrag.handlers().position.get(), 36, 'reduced motion still selects the flick destination');
+assert.equal(reducedDrag.haptics, 1, 'an immediate reduced-motion selection still gets its tactile cue');
 
 console.log('PASS: tab travel, loops, resizing and reduced motion remain intact. Mobile cards resist finger drag, cancel cleanly, and use bounded Motion inertia to snap strong flicks through every intervening week.');

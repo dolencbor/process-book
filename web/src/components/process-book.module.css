@@ -119,6 +119,7 @@
 .tableRow { position: relative; min-height: 54.5px; padding: 20px 8px; align-items: center; font-family: var(--font-suisse-intl-book), Arial, Helvetica, sans-serif; font-weight: 400; font-size: 14px; line-height: 1; letter-spacing: -0.02em; }
 .tableWeek { display: inline-flex; align-items: center; gap: 6px; }
 .tableWeek .number { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum" 1, "tnum" 1, "zero" 0; }
+.tableWeek .number, .rowButton > span { display: block; }
 .tableRow[data-preview="true"] { background: var(--surface); }
 .mobileTopRowHighlight { display: none; }
 .rowButton { position: static; display: block; width: 100%; min-width: 0; overflow-wrap: anywhere; }

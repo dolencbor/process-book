@@ -6,13 +6,14 @@ import { motionValue, keyframes } from "motion";
 const source = fs.readFileSync('src/components/process-book.tsx', 'utf8');
 const start = source.indexOf('function WeekTableView(');
 const end = source.indexOf('  return <div className={styles.tableView}', start);
-const component = source.slice(start, end) + '  return { handleScroll, handleWheel, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition, settleMobileList, mobileSnapped, listTouching };\n}';
+const component = source.slice(start, end) + '  return { handleScroll, handleWheel, beginListTouch, interruptTravel, indicatePeriod, schedulePointer, trackPointer, focusWeek, blurWeek, captureListPosition, settleMobileList, mobileSnapped, listTouching };\n}';
+const motionTokens = source.slice(source.indexOf('const interfaceTransition'), source.indexOf('// Tab controls'));
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
-const js = ts.transpile(source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
+const js = ts.transpile(motionTokens + '\n' + source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
 function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null, roundedGeometry = false) {
   const hooks = [], effects = [], periods = [], visibleWeeks = [], navigations = []; let geometryReads=0, rowReads=0;
-  let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, timerId = 0, handlers, activeElement = null; const frames = new Map(), timers = new Map();
+  let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, timerId = 0, lastTimerDelay = null, handlers, activeElement = null, haptics = 0; const frames = new Map(), timers = new Map();
   const flush = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(fn=>fn()); };
   const flushTimers = () => { const jobs = [...timers.values()]; timers.clear(); jobs.forEach(fn=>fn()); };
   const heading = mobile ? 263 : 281;
@@ -42,7 +43,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   const context = {
     useIsPresent:()=>true, useReducedMotion:()=>reduced, useMobileLayout:()=>mobile,
     requestAnimationFrame:fn=>{frames.set(++frameId,fn);return frameId;},cancelAnimationFrame:id=>frames.delete(id),
-    setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),
+    setTimeout:(fn,delay)=>{lastTimerDelay=delay;timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),
     ResizeObserver:class{observe(){}disconnect(){}},
     useCallback:(fn,deps)=>{const state=hook(()=>({fn,deps}));if(deps.some((v,i)=>v!==state.deps[i])){state.fn=fn;state.deps=deps;}return state.fn;},
     useRef:value=>hook(()=>({current:value})),
@@ -55,8 +56,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     },
     document:{get activeElement(){return activeElement;},elementFromPoint:()=>({closest:()=>rows[42]})},
     weeks:Array.from({length:28},(_,index)=>({id:`fixture-${index}`})),periodForWeek:n=>Math.floor(n/7),
-    interfaceTransition:{type:'tween',duration:.68,ease:[.22,1,.36,1]},
-    mobileRowSnapTransition:{type:'tween',duration:.22,ease:[.22,1,.36,1]},
+    pulseSelectionHaptic: () => { haptics++; },
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
@@ -64,7 +64,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   const props={category:Math.floor(week/7),jumpWeek:week,jumpVersion:0,initialListLocation,active:true,onWeekSelect(){},
     onNavigate:(week,location)=>navigations.push({week,location}),
     onWeekChange:week=>visibleWeeks.push(week),onPeriodChange:period=>{props.category=period;periods.push(period);}};
-  const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[17].value);effects.splice(0).forEach(fn=>fn());return handlers;};
+  const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[18].value);effects.splice(0).forEach(fn=>fn());return handlers;};
   render(); render();
   return {
     element,periods,visibleWeeks,rows,navigations,
@@ -87,13 +87,15 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
       const queued=frames.size;flush();render();
       return{queued,reads:geometryReads-before,queries:rowReads-queries};
     },
-    get animation(){return animation;},get commands(){return commands;},get category(){return props.category;},
+    get animation(){return animation;},get commands(){return commands;},get category(){return props.category;},get haptics(){return haptics;},
+    get settleDelay(){return lastTimerDelay;},
     jump(week){props.category=Math.floor(week/7);props.jumpWeek=week;props.jumpVersion++;render();},
     advance(ms=10000){const a=animation;while(a&&!a.stopped&&a.time<ms){a.time=Math.min(ms,a.time+1000/60);const sample=a.generator.next(a.time);a.options.onUpdate(sample.value);render().handleScroll();flush();if(sample.done){a.options.onComplete();render().handleScroll();flush();break;}}},
     manual(top,settle=true){element.scrollTop=top;render().handleScroll();flush();render();if(settle){flushTimers();render();}},
     settle(){flushTimers();render();},
     lateSettle(){render().settleMobileList();render();},
     wheel(deltaY=1){render().handleWheel({deltaY});render();},
+    touchStart(){render().beginListTouch();render();},
     hold(value){handlers.listTouching.current=value;},
     capture(){render().captureListPosition();},
     interrupt(){render().interruptTravel();render();},
@@ -175,8 +177,10 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.snapped,false,'List never snaps under a finger held on the rows');
   mobile.hold(false);
   mobile.manual(mobile.at(14).offsetTop+32,false);
+  assert.equal(mobile.settleDelay,80,'the List starts its row detent promptly after input stops');
   mobile.settle();
   if (!reducedMotion) {
+    assert.equal(mobile.animation.options.duration,.16,'the Motion row detent lands in 160ms without changing its curve');
     assert.equal(mobile.animation.target,mobile.at(15).offsetTop,'the nearest row becomes the only landing target after momentum');
     assert.equal(mobile.snapped,false,'the snap state stays pending until the row reaches its slot');
     assert.equal(mobile.element.dataset.snapping,'true','native scrolling pauses while Motion owns the row detent');
@@ -242,6 +246,32 @@ assert.equal(wheelEdge.commands,0,'an early scrollend cannot start a competing s
 wheelEdge.settle();wheelEdge.advance();
 assert.equal(wheelEdge.element.scrollTop,wheelEdge.at(wheelEdge.preview.week).offsetTop,
   'a clamped wheel event at the physical edge still triggers the loop handoff');
+for (const entry of [5, 2*28+15]) {
+  const touchLoop=createTable(852,0,false,true);
+  touchLoop.manual(touchLoop.rows[entry].offsetTop,false);
+  const week=entry%28;
+  touchLoop.touchStart();
+  assert.equal(touchLoop.element.scrollTop,touchLoop.at(week).offsetTop,
+    'a new touch begins on the matching middle-copy row before the edge can clamp it');
+  assert.equal(touchLoop.preview.week,week,'rebasing at touchstart retains the selected week image');
+  const wheelLoop=createTable(852,0,false,true);
+  wheelLoop.manual(wheelLoop.rows[entry].offsetTop,false);
+  wheelLoop.wheel(entry<28?-1:1);
+  assert.equal(wheelLoop.element.scrollTop,wheelLoop.at(week).offsetTop,
+    'a wheel gesture rebases before its next delta instead of stopping at an outer-copy edge');
+}
+const continuousLoop=createTable(852,0,false,true);
+const nearTop=continuousLoop.rows[1].offsetTop+8;
+continuousLoop.manual(nearTop,false);
+assert.equal(continuousLoop.element.scrollTop,continuousLoop.cycleHeight+nearTop,
+  'a continuing upward swipe gains room before the native top edge can clamp');
+assert.equal(continuousLoop.preview.week,1,'upward guard preserves the visible week image');
+const nearBottom=continuousLoop.element.scrollHeight-continuousLoop.element.clientHeight-8;
+const bottomWeek=continuousLoop.rows.findIndex((row,index)=>index+1===continuousLoop.rows.length || continuousLoop.rows[index+1].offsetTop>nearBottom)%28;
+continuousLoop.manual(nearBottom,false);
+assert.equal(continuousLoop.element.scrollTop,nearBottom-continuousLoop.cycleHeight,
+  'a continuing downward flick gains room before the native bottom edge can clamp');
+assert.equal(continuousLoop.preview.week,bottomWeek,'downward guard preserves the visible week image');
 const edgeTab=createTable(852,0,false,true);
 edgeTab.manual(edgeTab.element.scrollHeight-edgeTab.element.clientHeight,false);
 edgeTab.jump(21);edgeTab.advance();
@@ -278,10 +308,12 @@ assert(abandonedSnap.stopped,'a period tab cancels the incomplete row detent');
 const firstTabTrip=snapToTab.animation;
 snapToTab.advance(100);
 snapToTab.jump(7);
+  assert.equal(snapToTab.haptics,0,'interrupted detents and passing rows stay silent');
 assert(firstTabTrip.stopped,'a second period tab cancels the first tab trip');
 snapToTab.settle();
 assert.equal(snapToTab.animation.target,snapToTab.at(7).offsetTop,'an old settle callback cannot replace the latest tab destination');
 snapToTab.advance();
+  assert.equal(snapToTab.haptics,1,'the final selected row gives one tactile cue');
 assert.equal(snapToTab.element.scrollTop,snapToTab.at(7).offsetTop);
 assert.equal(snapToTab.preview.week,7);
 assert.equal(snapToTab.snapped,true);

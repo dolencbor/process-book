@@ -40,7 +40,8 @@ function fixture(code, reduced=false, mobile=false) {
     styles:new Proxy({},{get:(_,key)=>key}),
     weeks:Array.from({length:28},(_,i)=>({number:String(i+1).padStart(2,'0'),title:'Week title'})),
     periodForWeek:w=>Math.floor(w/7),screenReveal:()=>({}),revealStep:.12,maskedText:{},interfaceTransition:{},
-    mobileRowHighlightTransition:{type:'tween',duration:.16},
+    listRowRevealCount:18,listRowReveal:()=>({}),
+    mobileRowHighlightTransition:{type:'tween',duration:.16},mobileRowSettleDelay:80,
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
