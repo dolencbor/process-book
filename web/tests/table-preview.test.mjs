@@ -19,12 +19,13 @@ function fixture(code, reduced=false, mobile=false) {
   const contains=(node,child)=>node===child||(node?.children||[]).some(n=>contains(n,child));
   const hook=make=>hooks[cursor++]??=make();
   const viewport={dataset:{},clientHeight:619,getBoundingClientRect:()=>({top:281,bottom:900})};
-  const rows=Array.from({length:84},(_,i)=>({offsetTop:i*54.5,offsetHeight:54.5,dataset:{tableWeek:String(i%28),tableEntry:String(i)},getBoundingClientRect:()=>({top:281+i*54.5-scrollTop,height:54.5})}));
+  const rowCount=mobile?140:84;
+  const rows=Array.from({length:rowCount},(_,i)=>({offsetTop:i*54.5,offsetHeight:54.5,dataset:{tableWeek:String(i%28),tableEntry:String(i)},getBoundingClientRect:()=>({top:281+i*54.5-scrollTop,height:54.5})}));
   const table={querySelector:s=>rows[Number(s.match(/"(\d+)"/)[1])],querySelectorAll:()=>rows,contains:row=>rows.includes(row),getBoundingClientRect:()=>({top:281-scrollTop})};
   const fixedHost={getBoundingClientRect:()=>({top:find(tree,'rowPreviewViewport')?281:0})};
   const media={clientWidth:371,offsetParent:fixedHost};
   const context={
-    document:{elementFromPoint:(x,y)=>({closest:()=>rows[Math.max(0,Math.min(83,Math.floor((y-281+scrollTop)/54.5)))]})},
+    document:{elementFromPoint:(x,y)=>({closest:()=>rows[Math.max(0,Math.min(rowCount-1,Math.floor((y-281+scrollTop)/54.5)))]})},
     React:{createElement:h}, Link:'a', motion:new Proxy({},{get:(_,tag)=>'motion.'+tag}),
     AnimatePresence:'presence',TablePeriodHeading:'heading',WeekNumber:'number',PreviewImage:'image',
     useIsPresent:()=>true,useReducedMotion:()=>reduced,useMobileLayout:()=>mobile,
@@ -41,7 +42,7 @@ function fixture(code, reduced=false, mobile=false) {
     weeks:Array.from({length:28},(_,i)=>({number:String(i+1).padStart(2,'0'),title:'Week title'})),
     periodForWeek:w=>Math.floor(w/7),screenReveal:()=>({}),revealStep:.12,maskedText:{},interfaceTransition:{},
     listRowRevealCount:18,listRowReveal:()=>({}),
-    mobileRowHighlightTransition:{type:'tween',duration:.16},mobileRowSettleDelay:80,
+    mobileRowHighlightTransition:{type:'tween',duration:.16},mobileRowSettleDelay:220,
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
@@ -52,7 +53,8 @@ function fixture(code, reduced=false, mobile=false) {
       // CSS transforms on an absolute box inside a scroll container add to
       // its overflow area, even when that box's child is centered upward.
       const node=find(tree,'rowPreview');
-      return geometry.inside?Math.max(4578,node.props.style.y.get()+371):4578;
+      const contentHeight=rowCount*54.5;
+      return geometry.inside?Math.max(contentHeight,node.props.style.y.get()+371):contentHeight;
     }},
     scrollTop:{get:()=>scrollTop,set:v=>{scrollTop=Math.max(0,Math.min(viewport.scrollHeight-viewport.clientHeight,v));}},
   });

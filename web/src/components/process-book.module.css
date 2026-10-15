@@ -102,7 +102,9 @@
 .tableCanvas { position: absolute; inset: 0 8px; }
 .tableHeader { position: absolute; z-index: 2; top: 0; left: -8px; right: -8px; height: calc(var(--table-heading-height) - var(--table-top)); padding: calc(124px - var(--table-top)) 8px 0; background: #fff; }
 .tableScroll { position: absolute; inset: calc(var(--table-heading-height) - var(--table-top)) 0 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior-y: contain; overflow-anchor: none; scrollbar-width: none; scroll-behavior: auto; }
-.tableScroll[data-travelling="true"], .tableScroll[data-snapping], .scrollViewport[data-travelling="true"] { overflow-y: hidden; }
+/* Keep the List a scroll container throughout touch momentum and Motion detents.
+   Changing overflow during a gesture can strand iOS Safari's native scroller. */
+.scrollViewport[data-travelling="true"] { overflow-y: hidden; }
 .tableScroll:focus-visible { outline: none; }
 .tableScroll::-webkit-scrollbar { display: none; }
 .tableContent { position: relative; flex-shrink: 0; width: 100%; }

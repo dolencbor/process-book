@@ -46,7 +46,6 @@ const context = {
     if (name === "motion/react") return { ...actualMotion, motion: trackedMotion, useReducedMotion: () => reducedMotion };
     if (name === "./switcher-surface") return surfaceModule.exports;
     if (name === "./use-mobile-layout") return { useMobileLayout: () => false };
-    if (name === "./selection-haptics") return { pulseSelectionHaptic() {} };
     if (name === "./use-tab-widths") return { useTabWidths(target, transition) {
       widthTransitions.push(transition);
       return hookModule.exports.useTabWidths(target, transition);

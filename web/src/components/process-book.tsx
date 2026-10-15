@@ -9,7 +9,6 @@ import styles from "./process-book.module.css";
 import { useSmoothCorners } from "./use-smooth-corners";
 import { useTabWidths } from "./use-tab-widths";
 import { useMobileLayout } from "./use-mobile-layout";
-import { pulseSelectionHaptic } from "./selection-haptics";
 import { SwitcherSurface, switcherClip } from "./switcher-surface";
 import { ProcessBookProvider, useProcessBookContent } from "./process-book-content";
 import { resolveBookPosition, saveBookPosition, useProcessBookHistory, type ListLocation } from "./process-book-history";
@@ -19,8 +18,8 @@ const MotionLink = motion.create(Link);
 
 const interfaceTransition = { type: "tween", duration: 0.68, ease: [0.22, 1, 0.36, 1] } satisfies Transition;
 const mobileRowHighlightTransition = { ...interfaceTransition, duration: 0.16 } satisfies Transition;
-const mobileRowSnapTransition = { ...interfaceTransition, duration: 0.16 } satisfies Transition;
-const mobileRowSettleDelay = 80;
+const mobileRowSnapTransition = { ...interfaceTransition, duration: 0.12 } satisfies Transition;
+const mobileRowSettleDelay = 96;
 // Tab controls always use finite tweens: no inherited spring or momentum.
 const tabResizeTransition = { ...interfaceTransition, type: "tween" } satisfies Transition;
 const instantTabTransition = { type: "tween", duration: 0 } satisfies Transition;
@@ -337,19 +336,20 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   const targetY = useMotionValue(0);
   const y = useSpring(targetY, { stiffness: 500, damping: 40, mass: 0.7 });
   const previousJump = useRef<number | null>(null);
-  const lastSettledWeek = useRef(initialListLocation?.week ?? jumpWeek);
   const rowGeometry = useRef<{ rows: HTMLElement[]; ends: number[]; cycleHeight: number; ready: boolean; highlightEntry: number; highlightHeight: number }>({ rows: [], ends: [], cycleHeight: 0, ready: false, highlightEntry: -1, highlightHeight: 0 });
   const indicated = useRef({ week: -1, period: -1 });
   const pointerFrame = useRef(0);
   const pendingPointer = useRef<{ scrolled: boolean; index?: number }>({ scrolled: false });
   const mobile = useMobileLayout();
-  const [copies, setCopies] = useState(3);
+  const centerCycle = mobile ? 2 : 1;
+  const [copies, setCopies] = useState(mobile ? 5 : 3);
   const mobileSnapped = useRef(initialListLocation ? initialListLocation.offset < 0.001 : false);
   const setMobileSnapped = (snapped: boolean) => { mobileSnapped.current = snapped; };
   const mobileSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wheelBusy = useRef(false);
+  const mobileSettleFrame = useRef(0);
+  const nativeScrollEnd = useRef(false);
   const listTouching = useRef(false);
-  const previewEntry = useRef(weeks.length + jumpWeek);
+  const previewEntry = useRef(centerCycle * weeks.length + jumpWeek);
   const recyclingFocus = useRef(false);
   const mobileSnap = useRef<{ stop: () => void } | null>(null);
   const sizeMobileHighlight = useCallback((entry: number) => {
@@ -372,12 +372,15 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const scroll = viewport.current;
     const element = table.current;
     if (!scroll || !element) return;
+    nativeScrollEnd.current = "onscrollend" in scroll;
     const measure = () => {
       const rows = Array.from(element.querySelectorAll<HTMLElement>("[data-table-week]"));
       const cycleHeight = rows[weeks.length]?.offsetTop - (rows[0]?.offsetTop ?? 0);
-      // One complete cycle before the current year, and enough after it to
-      // cover even a viewport taller than the whole year. DOM size is bounded.
-      const needed = cycleHeight > 0 ? Math.max(3, 2 + Math.ceil(scroll.clientHeight / cycleHeight)) : 3;
+      // Mobile gets two complete years of runway on each side so a fast
+      // Safari fling cannot hit a physical end before scrollend. Taller
+      // viewports add only the copies needed to keep the final row reachable.
+      const baseCopies = mobile ? 5 : 3;
+      const needed = cycleHeight > 0 ? Math.max(baseCopies, centerCycle + 1 + Math.ceil(scroll.clientHeight / cycleHeight)) : baseCopies;
       rowGeometry.current = {
         rows, ends: rows.map((row, index) => rows[index + 1]?.offsetTop ?? row.offsetTop + row.offsetHeight), cycleHeight,
         ready: cycleHeight > 0 && rows.length >= needed * weeks.length,
@@ -393,30 +396,35 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     const observer = new ResizeObserver(measure);
     observer.observe(scroll); observer.observe(element);
     return () => observer.disconnect();
-  }, [copies, mobile, sizeMobileHighlight, weeks.length]);
+  }, [centerCycle, copies, mobile, sizeMobileHighlight, weeks.length]);
   useEffect(() => () => {
     cancelAnimationFrame(pointerFrame.current);
     pointerFrame.current = 0;
     if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+    cancelAnimationFrame(mobileSettleFrame.current);
     mobileSnap.current?.stop();
   }, [active]);
 
-  const recycle = useCallback(() => {
+  const recycle = useCallback((onlyNearEdge = false) => {
     const scroll = viewport.current;
     const { cycleHeight, rows, ready } = rowGeometry.current;
     if (!scroll || !ready) return;
     const top = scroll.scrollTop;
     const cycle = Math.floor(top / cycleHeight);
-    if (cycle === 1) return;
+    if (cycle === centerCycle) return;
+    if (mobile && onlyNearEdge) {
+      const maxTop = scroll.scrollHeight - scroll.clientHeight;
+      if (top >= cycleHeight && top <= maxTop - cycleHeight) return;
+    }
     // Identical rows replace identical rows at exactly the same pixel offset.
     // Keep the fractional position unchanged across identical copies.
-    scroll.scrollTop = top + (1 - cycle) * cycleHeight;
+    scroll.scrollTop = top + (centerCycle - cycle) * cycleHeight;
     writtenTop.current = scroll.scrollTop;
-    const shift = (1 - cycle) * weeks.length;
+    const shift = (centerCycle - cycle) * weeks.length;
     previewEntry.current += shift;
     if (focused.current !== null) {
       const oldRow = rows[focused.current];
-      focused.current = weeks.length + focused.current % weeks.length;
+      focused.current = centerCycle * weeks.length + focused.current % weeks.length;
       const nextRow = rows[focused.current];
       if (oldRow?.contains(document.activeElement) && nextRow) {
         recyclingFocus.current = true;
@@ -424,12 +432,15 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         recyclingFocus.current = false;
       }
     }
-  }, [weeks.length]);
+  }, [centerCycle, mobile, weeks.length]);
 
   const stopMobileSnap = () => {
     mobileSnap.current?.stop();
     mobileSnap.current = null;
-    wheelBusy.current = false;
+    if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+    mobileSettleTimer.current = null;
+    cancelAnimationFrame(mobileSettleFrame.current);
+    mobileSettleFrame.current = 0;
     if (viewport.current) delete viewport.current.dataset.snapping;
     writtenTop.current = null;
   };
@@ -462,7 +473,9 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     travelCycle.current = null;
     writtenTop.current = null;
     if (viewport.current) delete viewport.current.dataset.travelling;
-    recycle();
+    // A finger can interrupt tab travel in the middle of a repeated copy.
+    // Leave that copy in place until the new native swipe has ended.
+    if (!mobile) recycle();
     indicatePeriod();
   };
 
@@ -510,7 +523,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
   }, [active, mobile, reducedMotion, targetY, y, weeks.length]);
 
   const settleMobileList = () => {
-    if (!mobile || !active || travelling.current || listTouching.current || mobileSnap.current || wheelBusy.current) return;
+    if (!mobile || !active || travelling.current || listTouching.current || mobileSnap.current) return;
     const scroll = viewport.current;
     if (!scroll || !rowGeometry.current.ready) return;
     if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
@@ -532,28 +545,20 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       scroll.scrollTop = target;
       writtenTop.current = scroll.scrollTop;
       mobileSnap.current = null;
-      // Rebase an outer copy only after the row is at rest, while overflow is
-      // locked. The next gesture begins in the middle copy with room in both
-      // directions, instead of stalling at the physical end of the List.
-      recycle();
+      // Rebase only after the row is at rest. Writing scrollTop during Safari's
+      // native momentum can cancel the remainder of the swipe.
+      recycle(true);
       indicatePeriod(true);
-      const week = Number(rows[index].dataset.tableWeek);
-      if (week !== lastSettledWeek.current) {
-        lastSettledWeek.current = week;
-        pulseSelectionHaptic();
-      }
-      // The hidden-overflow interval cancels the previous momentum. Release
-      // it immediately so the first new wheel or touch gesture can scroll.
       delete scroll.dataset.snapping;
     };
     if (reducedMotion || Math.abs(target - scroll.scrollTop) < 0.5) {
-      if (Math.floor(target / rowGeometry.current.cycleHeight) !== 1)
+      if (Math.floor(target / rowGeometry.current.cycleHeight) !== centerCycle)
         scroll.dataset.snapping = "true";
       finish();
       return;
     }
-    // Safari's native snap and script-driven recycling used to fight over the
-    // destination. Let native momentum finish, then make one Motion detent.
+    // A native scrollend (or the older-Safari idle fallback) owns the handoff.
+    // Keep overflow scrollable while Motion makes the final short detent.
     scroll.dataset.snapping = "true";
     mobileSnap.current = animate(scroll.scrollTop, target, {
       ...mobileRowSnapTransition,
@@ -567,10 +572,26 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
 
   const queueMobileSettle = () => {
     if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+    cancelAnimationFrame(mobileSettleFrame.current);
     mobileSettleTimer.current = setTimeout(() => {
       mobileSettleTimer.current = null;
-      wheelBusy.current = false;
-      settleMobileList();
+      const scroll = viewport.current;
+      if (!scroll || listTouching.current || travelling.current) return;
+      const top = scroll.scrollTop;
+      let stableFrames = 0;
+      const check = () => {
+        if (Math.abs(scroll.scrollTop - top) > 0.25) {
+          queueMobileSettle();
+          return;
+        }
+        if (++stableFrames === 2) {
+          mobileSettleFrame.current = 0;
+          settleMobileList();
+          return;
+        }
+        mobileSettleFrame.current = requestAnimationFrame(check);
+      };
+      mobileSettleFrame.current = requestAnimationFrame(check);
     }, mobileRowSettleDelay);
   };
 
@@ -586,11 +607,11 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     // A second tab click inherits the first trip's repeated year. Sampling
     // scrollTop mid-trip can cross a cycle boundary and send the next click
     // backwards through an identical copy of the rows.
-    let cycle = immediate ? 1 : continuingCycle ?? Math.floor(scroll.scrollTop / cycleHeight);
+    let cycle = immediate ? centerCycle : continuingCycle ?? Math.floor(scroll.scrollTop / cycleHeight);
     let destination = entry ?? cycle * weeks.length + index;
     const maxTop = scroll.scrollHeight - scroll.clientHeight;
     if (mobile && !immediate && rows[destination]?.offsetTop > maxTop &&
-      Math.floor(scroll.scrollTop / cycleHeight) > 1) {
+      Math.floor(scroll.scrollTop / cycleHeight) > centerCycle) {
       // The last repeated year cannot fit every row under the header. Move
       // its identical current row to the center before the visible tab trip,
       // so selecting a later period still travels forward through the weeks.
@@ -607,6 +628,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     if (!row) return;
     if (mobile) {
       if (mobileSettleTimer.current) clearTimeout(mobileSettleTimer.current);
+      cancelAnimationFrame(mobileSettleFrame.current);
+      mobileSettleFrame.current = 0;
       setMobileSnapped(false);
     }
     // Mark tab travel so its own scroll writes cannot trigger a row selection.
@@ -628,10 +651,6 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       delete scroll.dataset.travelling;
       indicated.current.week = index;
       onWeekChange(index);
-      if (mobile && index !== lastSettledWeek.current) {
-        lastSettledWeek.current = index;
-        if (!immediate) pulseSelectionHaptic();
-      }
       if (mobile) {
         const landing = rowGeometry.current.ends.findIndex(end => end > scroll.scrollTop + 0.5);
         const entryIndex = landing < 0 ? destination : landing;
@@ -673,7 +692,16 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         delete scroll.dataset.travelling;
       }
     };
-  }, [active, mobile, reducedMotion, onWeekChange, show, recycle, sizeMobileHighlight, weeks.length]);
+  }, [active, centerCycle, mobile, reducedMotion, onWeekChange, show, recycle, sizeMobileHighlight, weeks.length]);
+
+  const previousMobile = useRef(mobile);
+  useLayoutEffect(() => {
+    if (previousMobile.current === mobile) return;
+    previousMobile.current = mobile;
+    // Hydration and breakpoint changes can move the center copy. Preserve the
+    // visible week and row offset before any swipe begins.
+    recycle();
+  }, [mobile, recycle]);
 
   useLayoutEffect(() => {
     if (!rowGeometry.current.ready) return;
@@ -684,22 +712,21 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     previousJump.current = jumpVersion;
     indicated.current.period = -1;
     if (firstPlacement && initialListLocation && viewport.current) {
-      const row = rowGeometry.current.rows[weeks.length + initialListLocation.week];
+      const row = rowGeometry.current.rows[centerCycle * weeks.length + initialListLocation.week];
       if (row) {
         viewport.current.scrollTop = row.offsetTop + row.offsetHeight * initialListLocation.offset;
         writtenTop.current = viewport.current.scrollTop;
         indicated.current.week = initialListLocation.week;
-        lastSettledWeek.current = initialListLocation.week;
         indicated.current.period = periodForWeek(initialListLocation.week);
         if (mobile) {
-          sizeMobileHighlight(weeks.length + initialListLocation.week);
-          show(weeks.length + initialListLocation.week);
+          sizeMobileHighlight(centerCycle * weeks.length + initialListLocation.week);
+          show(centerCycle * weeks.length + initialListLocation.week);
         }
         return;
       }
     }
     return goToWeek(index, firstPlacement);
-  }, [jumpWeek, jumpVersion, initialListLocation, goToWeek, copies, mobile, periodForWeek, show, sizeMobileHighlight, weeks.length]);
+  }, [jumpWeek, jumpVersion, initialListLocation, goToWeek, copies, centerCycle, mobile, periodForWeek, show, sizeMobileHighlight, weeks.length]);
 
   const trackPointer = useCallback(() => {
     if (mobile) return;
@@ -736,7 +763,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
         // against the moving scroll layer. Recycle only after its final detent.
         if (!travelling.current && !mobile) recycle();
         indicatePeriod();
-        if (mobile && !travelling.current) {
+        if (mobile && !travelling.current && !mobileSnap.current && !nativeScrollEnd.current) {
           queueMobileSettle();
         }
       }
@@ -750,23 +777,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     // Remove the selected surface on the first real scroll event, before the
     // batched row/period work runs. Ignore our own tab-travel writes.
     if (mobile && !travelling.current && !mobileSnap.current && nativeScroll && scroll) {
+      writtenTop.current = null;
       setMobileSnapped(false);
-      const { cycleHeight, ready } = rowGeometry.current;
-      if (ready) {
-        // A long uninterrupted flick can cross the whole outer copy. Rebase
-        // before the native scroller clamps, but only near its physical edge;
-        // ordinary momentum still runs without a scripted scrollTop write.
-        const guard = Math.min(cycleHeight / 4, scroll.clientHeight / 2);
-        if (scroll.scrollTop < guard || scroll.scrollTop > scroll.scrollHeight - scroll.clientHeight - guard) {
-          const before = scroll.scrollTop;
-          recycle();
-          if (scroll.scrollTop !== before) {
-            writtenTop.current = null;
-            indicatePeriod();
-            queueMobileSettle();
-          }
-        }
-      }
     }
     schedulePointer(true);
   };
@@ -776,17 +788,14 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
       stopMobileSnap();
       setMobileSnapped(false);
       const scroll = viewport.current;
-      if (scroll) {
-        // Rebase before the browser applies this delta, not after it reaches
-        // a clamped edge. An outer copy can be entered by a tab trip or a
-        // fast wheel gesture; the matching middle row has room either way.
+      if (scroll && (scroll.scrollTop <= 1 || scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1)) {
+        // A new wheel gesture at a physical edge otherwise cannot emit a
+        // scroll event. This is a new input, not an in-flight momentum frame.
         recycle();
         writtenTop.current = null;
       }
-      wheelBusy.current = true;
-      // At the physical edge a wheel event can be clamped with no scroll
-      // event. It still needs a detent/rebase or the List feels stuck.
-      queueMobileSettle();
+      if (!nativeScrollEnd.current || !scroll || scroll.scrollTop <= 1 || scroll.scrollTop >= scroll.scrollHeight - scroll.clientHeight - 1)
+        queueMobileSettle();
     }
   };
 
@@ -794,10 +803,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     listTouching.current = true;
     if (mobile) { stopMobileSnap(); setMobileSnapped(false); }
     interruptTravel();
-    // iOS stops the previous momentum at touchstart. This is the safe point
-    // to move an identical outer-copy row to the middle before a new swipe;
-    // waiting for scrollend can leave the first gesture clamped at the edge.
-    if (mobile) recycle();
+    // Never change scrollTop at touchstart. WebKit can discard the new pan
+    // gesture when script moves its scroll container under the finger.
   };
 
   const captureListPosition = () => {
@@ -826,8 +833,8 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
     <div ref={viewport} className={styles.tableScroll} onScroll={handleScroll} onScrollEnd={settleMobileList}
       onWheel={handleWheel}
       onTouchStart={beginListTouch}
-      onTouchEnd={() => { listTouching.current = false; if (mobile) queueMobileSettle(); }}
-      onTouchCancel={() => { listTouching.current = false; if (mobile) settleMobileList(); }}
+      onTouchEnd={() => { listTouching.current = false; if (mobile && !nativeScrollEnd.current) queueMobileSettle(); }}
+      onTouchCancel={() => { listTouching.current = false; if (mobile && !nativeScrollEnd.current) queueMobileSettle(); }}
       onKeyDownCapture={event => {
         if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) { stopMobileSnap(); interruptTravel(); }
       }}>
@@ -846,7 +853,7 @@ const WeekTableView = memo(function WeekTableView({ category, jumpWeek, jumpVers
             }}>
             {Array.from({ length: copies * weeks.length }, (_, entry) => <TableRow key={entry}
               index={entry % weeks.length} entryIndex={entry}
-              revealOrder={entry - (weeks.length + (initialListLocation?.week ?? jumpWeek))}
+              revealOrder={entry - (centerCycle * weeks.length + (initialListLocation?.week ?? jumpWeek))}
               reducedMotion={reducedMotion}
               preview={!mobile && preview.visible && preview.week === entry % weeks.length}
               onFocus={focusWeek} onBlur={blurWeek} />)}
@@ -992,7 +999,6 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
   const viewport = useRef<HTMLDivElement>(null);
   const stack = useRef<HTMLDivElement>(null);
   const currentWeek = useRef(week);
-  const lastSettledWeek = useRef(week);
   const ready = useRef(false);
   const measuredHeight = useRef(0);
   const scrollStep = useRef(180);
@@ -1074,7 +1080,6 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     travelling.current = false;
     if (firstPlacement) {
       currentWeek.current = week;
-      lastSettledWeek.current = week;
       cycleOrigin.current = 0;
       const next = weeks.length + week;
       lastPosition.current = next;
@@ -1106,10 +1111,6 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       travelling.current = false;
       if (viewport.current) delete viewport.current.dataset.travelling;
       onPeriodChange(periodForWeek(jumpWeek));
-      if (mobile && jumpWeek !== lastSettledWeek.current) {
-        lastSettledWeek.current = jumpWeek;
-        pulseSelectionHaptic();
-      }
       return;
     }
     animate(position, target, {
@@ -1118,13 +1119,9 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
         travelling.current = false;
         if (viewport.current) delete viewport.current.dataset.travelling;
         onPeriodChange(periodForWeek(jumpWeek));
-        if (mobile && jumpWeek !== lastSettledWeek.current) {
-          lastSettledWeek.current = jumpWeek;
-          pulseSelectionHaptic();
-        }
       },
     });
-  }, [active, week, jumpWeek, jumpVersion, reducedMotion, inputPosition, position, onPeriodChange, periodForWeek, mobile, weeks.length]);
+  }, [active, week, jumpWeek, jumpVersion, reducedMotion, inputPosition, position, onPeriodChange, periodForWeek, weeks.length]);
 
   useMotionValueEvent(position, "change", latest => {
     if (!active) return;
@@ -1146,16 +1143,8 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
     lastPosition.current = latest;
   });
 
-  const signalSettledWeek = () => {
-    if (!mobile || !active) return;
-    const settled = wrapWeek(Math.round(position.get()), weeks.length);
-    if (settled === lastSettledWeek.current) return;
-    lastSettledWeek.current = settled;
-    pulseSelectionHaptic();
-  };
-
   const movePosition = (target: number, landing = false, gestureVelocity?: number) => {
-    if (reducedMotion) { position.jump(target); if (landing) signalSettledWeek(); return; }
+    if (reducedMotion) { position.jump(target); return; }
     const distance = target - position.get();
     // Carry motion into the landing without letting momentum cross the chosen
     // card. The velocity cap stays below this spring's no-overshoot threshold.
@@ -1164,7 +1153,7 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
       Math.max(0, (gestureVelocity ?? position.getVelocity()) * Math.sign(distance)),
       Math.abs(distance) * railSwipeVelocityLimit,
     );
-    animate(position, target, landing ? { ...railSnapSpring, velocity, onComplete: signalSettledWeek } : railSpring);
+    animate(position, target, landing ? { ...railSnapSpring, velocity } : railSpring);
   };
 
   const rebase = () => {
@@ -1233,7 +1222,6 @@ const WeekScrollView = memo(function WeekScrollView({ week, jumpWeek, jumpVersio
         ...railMomentumTransition,
         velocity: gestureVelocity,
         modifyTarget: projected => projectedRailTarget(current, projected, direction, weeks.length),
-        onComplete: signalSettledWeek,
       });
     } else movePosition(target, true, gestureVelocity);
     element.scrollTo({ top: (target - cycleOrigin.current) * scrollStep.current, behavior: "instant" });

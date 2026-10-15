@@ -11,15 +11,16 @@ const motionTokens = source.slice(source.indexOf('const interfaceTransition'), s
 const navigationStart = source.indexOf('const tabNavigationTransition');
 const navigationEnd = source.indexOf('\n});', navigationStart) + 4;
 const js = ts.transpile(motionTokens + '\n' + source.slice(navigationStart, navigationEnd) + '\n' + component, { target: ts.ScriptTarget.ES2022 });
-function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null, roundedGeometry = false) {
+function createTable(height = 900, week = 0, reduced = false, mobile = false, initialListLocation = null, roundedGeometry = false, supportsScrollEnd = false) {
   const hooks = [], effects = [], periods = [], visibleWeeks = [], navigations = []; let geometryReads=0, rowReads=0;
-  let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, timerId = 0, lastTimerDelay = null, handlers, activeElement = null, haptics = 0; const frames = new Map(), timers = new Map();
+  let cursor = 0, commands = 0, animation = null, top = 0, frameId = 0, timerId = 0, lastTimerDelay = null, handlers, activeElement = null; const frames = new Map(), timers = new Map();
   const flush = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(fn=>fn()); };
   const flushTimers = () => { const jobs = [...timers.values()]; timers.clear(); jobs.forEach(fn=>fn()); };
   const heading = mobile ? 263 : 281;
   const canvasStyles = new Map(); let highlightWrites = 0;
   const canvas = { style: { getPropertyValue: key => canvasStyles.get(key) ?? '', setProperty: (key,value) => { highlightWrites++; canvasStyles.set(key,value); } } };
   const element = { dataset:{},parentElement:canvas,clientHeight: height - heading, scrollHeight: 0, getBoundingClientRect(){geometryReads++;return{top:heading,bottom:height};} };
+  if (supportsScrollEnd) element.onscrollend = null;
   const media={clientWidth:371,offsetParent:{getBoundingClientRect(){geometryReads++;return{top:76};}}};
   Object.defineProperty(element,'scrollTop',{get:()=>top,set:v=>{top=Math.max(0,Math.min(element.scrollHeight-element.clientHeight,v));}});
   const rows = [];
@@ -56,7 +57,6 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     },
     document:{get activeElement(){return activeElement;},elementFromPoint:()=>({closest:()=>rows[42]})},
     weeks:Array.from({length:28},(_,index)=>({id:`fixture-${index}`})),periodForWeek:n=>Math.floor(n/7),
-    pulseSelectionHaptic: () => { haptics++; },
   };
   context.useProcessBookContent = () => ({ weeks: context.weeks, periodForWeek: context.periodForWeek });
   context.useEffect=context.useLayoutEffect;
@@ -64,7 +64,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
   const props={category:Math.floor(week/7),jumpWeek:week,jumpVersion:0,initialListLocation,active:true,onWeekSelect(){},
     onNavigate:(week,location)=>navigations.push({week,location}),
     onWeekChange:week=>visibleWeeks.push(week),onPeriodChange:period=>{props.category=period;periods.push(period);}};
-  const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[18].value);effects.splice(0).forEach(fn=>fn());return handlers;};
+  const render=()=>{cursor=0;handlers=context.WeekTableView(props);hooks[0].current=element;hooks[1].current=table;hooks[2].current=media;buildRows(hooks[17].value);effects.splice(0).forEach(fn=>fn());return handlers;};
   render(); render();
   return {
     element,periods,visibleWeeks,rows,navigations,
@@ -72,7 +72,7 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
     get highlightWrites(){return highlightWrites;},
     get snapped(){return handlers.mobileSnapped.current;},
     get cycleHeight(){return rows[28].offsetTop;},
-    at(week){return rows[28+week];},
+    at(week){return rows[(mobile ? 56 : 28)+week];},
     get preview(){return hooks[10].value;},
     focus(entry){ render(); rows[entry].querySelector().focus(); render(); },
     get focusedEntry(){return hooks[7].current;},
@@ -87,15 +87,20 @@ function createTable(height = 900, week = 0, reduced = false, mobile = false, in
       const queued=frames.size;flush();render();
       return{queued,reads:geometryReads-before,queries:rowReads-queries};
     },
-    get animation(){return animation;},get commands(){return commands;},get category(){return props.category;},get haptics(){return haptics;},
+    get animation(){return animation;},get commands(){return commands;},get category(){return props.category;},
     get settleDelay(){return lastTimerDelay;},
     jump(week){props.category=Math.floor(week/7);props.jumpWeek=week;props.jumpVersion++;render();},
     advance(ms=10000){const a=animation;while(a&&!a.stopped&&a.time<ms){a.time=Math.min(ms,a.time+1000/60);const sample=a.generator.next(a.time);a.options.onUpdate(sample.value);render().handleScroll();flush();if(sample.done){a.options.onComplete();render().handleScroll();flush();break;}}},
-    manual(top,settle=true){element.scrollTop=top;render().handleScroll();flush();render();if(settle){flushTimers();render();}},
-    settle(){flushTimers();render();},
+    manual(top,settle=true){element.scrollTop=top;render().handleScroll();flush();render();if(settle){flushTimers();flush();flush();render();}},
+    settle(){flushTimers();flush();flush();render();},
+    settleTimer(){flushTimers();render();},
+    frame(){flush();render();},
+    silentTop(value){element.scrollTop=value;},
+    get pendingSettle(){return timers.size;},
     lateSettle(){render().settleMobileList();render();},
     wheel(deltaY=1){render().handleWheel({deltaY});render();},
     touchStart(){render().beginListTouch();render();},
+    scrollEnd(){render().settleMobileList();render();},
     hold(value){handlers.listTouching.current=value;},
     capture(){render().captureListPosition();},
     interrupt(){render().interruptTravel();render();},
@@ -177,13 +182,13 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.snapped,false,'List never snaps under a finger held on the rows');
   mobile.hold(false);
   mobile.manual(mobile.at(14).offsetTop+32,false);
-  assert.equal(mobile.settleDelay,80,'the List starts its row detent promptly after input stops');
+  assert.equal(mobile.settleDelay,96,'older Safari checks for stable scroll position promptly after the last event');
   mobile.settle();
   if (!reducedMotion) {
-    assert.equal(mobile.animation.options.duration,.16,'the Motion row detent lands in 160ms without changing its curve');
+    assert.equal(mobile.animation.options.duration,.12,'the Motion row detent lands in 120ms without changing its curve');
     assert.equal(mobile.animation.target,mobile.at(15).offsetTop,'the nearest row becomes the only landing target after momentum');
     assert.equal(mobile.snapped,false,'the snap state stays pending until the row reaches its slot');
-    assert.equal(mobile.element.dataset.snapping,'true','native scrolling pauses while Motion owns the row detent');
+    assert.equal(mobile.element.dataset.snapping,'true','Motion owns the short final detent while native overflow remains enabled');
     mobile.advance();
   }
   assert.equal(mobile.element.scrollTop,mobile.at(15).offsetTop,'the controller actually lands on the next row');
@@ -216,7 +221,7 @@ for (const reducedMotion of [false,true]) {
   assert.equal(mobile.preview.week,27);
   assert(mobile.element.scrollHeight-mobile.element.clientHeight>mobile.at(27).offsetTop,'rows continue beyond Week 28');
   mobile.jump(0);mobile.advance();
-  assert.equal(mobile.preview.week,0);assert.equal(mobile.element.scrollTop,mobile.cycleHeight);
+  assert.equal(mobile.preview.week,0);assert.equal(mobile.element.scrollTop,2*mobile.cycleHeight);
 }
 const fromScroll=createTable(852,17,false,true);
 assert.equal(fromScroll.element.scrollTop,fromScroll.at(17).offsetTop,'switching from Scroll places the same week at the List snap slot');
@@ -239,10 +244,10 @@ assert.equal(endOfList.element.scrollTop,endOfList.at(endOfList.preview.week).of
 const wheelEdge=createTable(852,0,false,true);
 wheelEdge.manual(wheelEdge.element.scrollHeight-wheelEdge.element.clientHeight,false);
 wheelEdge.wheel();
-assert(wheelEdge.element.scrollTop>=wheelEdge.cycleHeight && wheelEdge.element.scrollTop<2*wheelEdge.cycleHeight,
+assert(wheelEdge.element.scrollTop>=2*wheelEdge.cycleHeight && wheelEdge.element.scrollTop<3*wheelEdge.cycleHeight,
   'a clamped wheel input immediately moves the identical row away from the physical boundary');
 wheelEdge.lateSettle();
-assert.equal(wheelEdge.commands,0,'an early scrollend cannot start a competing snap during wheel momentum');
+assert.equal(wheelEdge.commands,1,'scrollend starts one detent after a wheel reaches the physical edge');
 wheelEdge.settle();wheelEdge.advance();
 assert.equal(wheelEdge.element.scrollTop,wheelEdge.at(wheelEdge.preview.week).offsetTop,
   'a clamped wheel event at the physical edge still triggers the loop handoff');
@@ -251,26 +256,26 @@ for (const entry of [5, 2*28+15]) {
   touchLoop.manual(touchLoop.rows[entry].offsetTop,false);
   const week=entry%28;
   touchLoop.touchStart();
-  assert.equal(touchLoop.element.scrollTop,touchLoop.at(week).offsetTop,
-    'a new touch begins on the matching middle-copy row before the edge can clamp it');
-  assert.equal(touchLoop.preview.week,week,'rebasing at touchstart retains the selected week image');
+  assert.equal(touchLoop.element.scrollTop,touchLoop.rows[entry].offsetTop,
+    'touchstart never moves the scroller under the finger');
+  assert.equal(touchLoop.preview.week,week,'touchstart retains the selected week image');
   const wheelLoop=createTable(852,0,false,true);
   wheelLoop.manual(wheelLoop.rows[entry].offsetTop,false);
   wheelLoop.wheel(entry<28?-1:1);
-  assert.equal(wheelLoop.element.scrollTop,wheelLoop.at(week).offsetTop,
-    'a wheel gesture rebases before its next delta instead of stopping at an outer-copy edge');
+  assert.equal(wheelLoop.element.scrollTop,wheelLoop.rows[entry].offsetTop,
+    'wheel input away from a physical edge never teleports a moving row');
 }
 const continuousLoop=createTable(852,0,false,true);
 const nearTop=continuousLoop.rows[1].offsetTop+8;
 continuousLoop.manual(nearTop,false);
-assert.equal(continuousLoop.element.scrollTop,continuousLoop.cycleHeight+nearTop,
-  'a continuing upward swipe gains room before the native top edge can clamp');
+assert.equal(continuousLoop.element.scrollTop,nearTop,
+  'a continuing upward swipe is never interrupted by a scripted rebase');
 assert.equal(continuousLoop.preview.week,1,'upward guard preserves the visible week image');
 const nearBottom=continuousLoop.element.scrollHeight-continuousLoop.element.clientHeight-8;
 const bottomWeek=continuousLoop.rows.findIndex((row,index)=>index+1===continuousLoop.rows.length || continuousLoop.rows[index+1].offsetTop>nearBottom)%28;
 continuousLoop.manual(nearBottom,false);
-assert.equal(continuousLoop.element.scrollTop,nearBottom-continuousLoop.cycleHeight,
-  'a continuing downward flick gains room before the native bottom edge can clamp');
+assert.equal(continuousLoop.element.scrollTop,nearBottom,
+  'a continuing downward flick is never interrupted by a scripted rebase');
 assert.equal(continuousLoop.preview.week,bottomWeek,'downward guard preserves the visible week image');
 const edgeTab=createTable(852,0,false,true);
 edgeTab.manual(edgeTab.element.scrollHeight-edgeTab.element.clientHeight,false);
@@ -288,8 +293,8 @@ assert.equal(lastCopyTab.element.scrollTop,2*lastCopyTab.cycleHeight,
   'a late browser scrollend cannot rebase the completed tab trip');
 assert.equal(lastCopyTab.snapped,true);
 const laterPeriodFromOuterCopy=createTable(852,0,false,true);
-laterPeriodFromOuterCopy.manual(laterPeriodFromOuterCopy.rows[63].offsetTop);
-assert.equal(laterPeriodFromOuterCopy.element.scrollTop,laterPeriodFromOuterCopy.rows[35].offsetTop,
+laterPeriodFromOuterCopy.manual(laterPeriodFromOuterCopy.rows[119].offsetTop);
+assert.equal(laterPeriodFromOuterCopy.element.scrollTop,laterPeriodFromOuterCopy.rows[63].offsetTop,
   'a settled outer-copy row rebases to its identical center row before the next gesture');
 laterPeriodFromOuterCopy.jump(21);
 assert.equal(laterPeriodFromOuterCopy.animation.target,laterPeriodFromOuterCopy.at(21).offsetTop,
@@ -308,12 +313,10 @@ assert(abandonedSnap.stopped,'a period tab cancels the incomplete row detent');
 const firstTabTrip=snapToTab.animation;
 snapToTab.advance(100);
 snapToTab.jump(7);
-  assert.equal(snapToTab.haptics,0,'interrupted detents and passing rows stay silent');
 assert(firstTabTrip.stopped,'a second period tab cancels the first tab trip');
 snapToTab.settle();
 assert.equal(snapToTab.animation.target,snapToTab.at(7).offsetTop,'an old settle callback cannot replace the latest tab destination');
 snapToTab.advance();
-  assert.equal(snapToTab.haptics,1,'the final selected row gives one tactile cue');
 assert.equal(snapToTab.element.scrollTop,snapToTab.at(7).offsetTop);
 assert.equal(snapToTab.preview.week,7);
 assert.equal(snapToTab.snapped,true);
@@ -323,6 +326,32 @@ assert.equal(mobileInterrupted.element.dataset.travelling,undefined);
 assert(mobileInterrupted.animation.stopped);
 mobileInterrupted.manual(mobileInterrupted.at(7).offsetTop);
 assert.equal(mobileInterrupted.preview.week,7);assert.equal(mobileInterrupted.category,1);
+const nativeEnd=createTable(852,0,false,true,null,false,true);
+nativeEnd.manual(nativeEnd.at(8).offsetTop+34,false);
+assert.equal(nativeEnd.pendingSettle,0,'scrollend-capable Safari has no idle timer that can cut off momentum');
+nativeEnd.scrollEnd();
+assert.equal(nativeEnd.animation.target,nativeEnd.at(9).offsetTop,'native scrollend starts the short row detent');
+nativeEnd.advance();
+assert.equal(nativeEnd.snapped,true);
+const oldSafari=createTable(852,0,false,true);
+oldSafari.manual(oldSafari.at(8).offsetTop+24,false);
+oldSafari.settleTimer();
+assert.equal(oldSafari.commands,0,'the fallback timer alone does not seize a scrolling List');
+oldSafari.silentTop(oldSafari.at(8).offsetTop+34);
+oldSafari.frame();
+assert.equal(oldSafari.commands,0,'momentum that moves after the timer postpones the detent');
+oldSafari.settle();
+assert.equal(oldSafari.animation.target,oldSafari.at(9).offsetTop,
+  'two stable frames select one row after momentum actually rests');
+oldSafari.advance();
+assert.equal(oldSafari.snapped,true);
+const swipeInterrupted=createTable(852,0,false,true);
+swipeInterrupted.jump(21);
+swipeInterrupted.advance(100);
+const interruptedTop=swipeInterrupted.element.scrollTop;
+swipeInterrupted.touchStart();
+assert.equal(swipeInterrupted.element.scrollTop,interruptedTop,
+  'interrupting tab travel with a finger does not teleport the scrolling layer');
 const mobileWorkload=createTable(852,14,false,true);
 const highlightWrites=mobileWorkload.highlightWrites;
 const mobileBurst=mobileWorkload.burst(1000,mobileWorkload.at(14).offsetTop);
@@ -334,17 +363,21 @@ console.log('PASS: mobile top-row highlight and preview select immediately in bo
 // and recycle a fixed-size DOM rather than adding rows each lap.
 for (const mobile of [false,true]) for (const height of [400,600,900,1200,2200,4000]) {
   const looping=createTable(height,0,mobile,mobile), h=looping.cycleHeight, count=looping.rows.length;
-  assert(count>=84);assert(count<=28*(2+Math.ceil(looping.element.clientHeight/h)) || count===84);
-  assert.equal(looping.element.scrollTop,h);
+  assert(count>=28*(mobile?5:3));
+  assert(count<=28*Math.max(mobile?5:3,(mobile?3:2)+Math.ceil(looping.element.clientHeight/h)));
+  assert.equal(looping.element.scrollTop,(mobile?2:1)*h);
   if (mobile) {
-    looping.manual(2*h+40,false);
-    assert.equal(looping.element.scrollTop,2*h+40,'mobile momentum is not teleported while rows are moving');
+    looping.manual(3*h+40,false);
+    assert.equal(looping.element.scrollTop,3*h+40,'mobile momentum is not teleported while rows are moving');
     assert.equal(looping.snapped,false);
     looping.settle();looping.advance();
-    assert.equal(looping.element.scrollTop,h+57.5,'a rested detent rebases to its identical center row with room ahead');
-    looping.manual(h-40,false);
+    const lowerLanding=3*h+57.5;
+    const lowerNearEdge=lowerLanding>looping.element.scrollHeight-looping.element.clientHeight-h;
+    assert.equal(looping.element.scrollTop,(lowerNearEdge?2:3)*h+57.5,
+      'a rested detent keeps the outer copy until the physical edge is near');
+    looping.manual(2*h-40,false);
     looping.settle();looping.advance();
-    assert.equal(looping.element.scrollTop,2*h-57.5,'upward movement also rebases to the center copy');
+    assert.equal(looping.element.scrollTop,2*h-57.5,'upward movement keeps its copy while there is runway');
   } else {
     looping.manual(2*h+12.25,false);
     assert.equal(looping.element.scrollTop,h+12.25);assert.equal(looping.visibleWeeks.at(-1),0);assert.equal(looping.category,0);
@@ -355,9 +388,9 @@ for (const mobile of [false,true]) for (const height of [400,600,900,1200,2200,4
     if (mobile) {
       looping.manual(looping.element.scrollHeight-looping.element.clientHeight,false);
       looping.settle();looping.advance();
-      assert(looping.element.scrollTop>=h && looping.element.scrollTop<2*h,'the physical bottom rebases to a reachable middle copy');
+      assert(looping.element.scrollTop>=2*h && looping.element.scrollTop<3*h,'the physical bottom rebases to a reachable middle copy');
       looping.manual(0,false);looping.settle();looping.advance();
-      assert.equal(looping.element.scrollTop,h,'the physical top rebases for upward infinite scrolling');
+      assert.equal(looping.element.scrollTop,2*h,'the physical top rebases for upward infinite scrolling');
     } else {
       looping.manual(2*h+3.75,false);assert.equal(looping.element.scrollTop,h+3.75);
       looping.manual(h-3.75,false);assert.equal(looping.element.scrollTop,2*h-3.75);
@@ -372,7 +405,7 @@ const directionLoop=createTable(852,0,false,true);
 directionLoop.manual(directionLoop.rows[27].offsetTop);
 assert.equal(directionLoop.preview.week,27);
 assert.equal(directionLoop.preview.direction,-1,'Week 01 → 28 enters upward after the snap');
-directionLoop.manual(2*directionLoop.cycleHeight);
+directionLoop.manual(3*directionLoop.cycleHeight);
 assert.equal(directionLoop.preview.week,0);
 assert.equal(directionLoop.preview.direction,1,'Week 28 → 01 enters downward after the snap');
 
@@ -383,17 +416,17 @@ for (const mobile of [false,true]) {
   // application-owned selection animation on mobile.
   keyboard.manual(mobile ? keyboard.element.scrollHeight-keyboard.element.clientHeight : 2*keyboard.cycleHeight);
   if (mobile) { keyboard.settle(); keyboard.advance(); }
-  if (mobile) assert(keyboard.element.scrollTop>=keyboard.cycleHeight && keyboard.element.scrollTop<2*keyboard.cycleHeight);
+  if (mobile) assert(keyboard.element.scrollTop>=2*keyboard.cycleHeight && keyboard.element.scrollTop<3*keyboard.cycleHeight);
   else assert.equal(keyboard.element.scrollTop,keyboard.cycleHeight);
-  assert.equal(keyboard.activeEntry,28,'focus transfers to the identical recycled row without scrolling');
-  assert.equal(keyboard.focusedEntry,28);
+  assert.equal(keyboard.activeEntry,mobile?56:28,'focus transfers to the identical recycled row without scrolling');
+  assert.equal(keyboard.focusedEntry,mobile?56:28);
   assert.equal(keyboard.commands,mobile ? 1 : 0,'recycling link focus must not add an animation beyond the mobile row detent');
   if(mobile) {assert.equal(keyboard.preview.week,keyboard.visibleWeeks.at(-1)); assert.equal(keyboard.category,Math.floor(keyboard.preview.week/7));}
   for(let lap=0;lap<5;lap++) {
-    keyboard.manual(2*keyboard.cycleHeight+12.25,false);
+    keyboard.manual((mobile?3:2)*keyboard.cycleHeight+12.25,false);
     if(mobile) { keyboard.settle();keyboard.advance(); }
-    assert.equal(keyboard.activeEntry,28,'offscreen focused rows stay in the canonical cycle across multiple laps');
-    assert.equal(keyboard.focusedEntry,28);
+    assert.equal(keyboard.activeEntry,mobile?56:28,'offscreen focused rows stay in the canonical cycle across multiple laps');
+    assert.equal(keyboard.focusedEntry,mobile?56:28);
   }
 }
 console.log('PASS: keyboard focus crosses the loop seam, transfers to the matching row without scrolling, and does not restart tab travel.');

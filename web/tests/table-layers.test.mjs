@@ -2,11 +2,16 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import postcss from "postcss";
 const sheet=postcss.parse(fs.readFileSync('src/components/process-book.module.css','utf8'));
-let travelOverflow;
-sheet.walkRules('.tableScroll[data-travelling="true"], .tableScroll[data-snapping], .scrollViewport[data-travelling="true"]', rule => {
- rule.walkDecls('overflow-y', declaration => { travelOverflow=declaration.value; });
+let scrollTravelOverflow;
+sheet.walkRules('.scrollViewport[data-travelling="true"]', rule => {
+ rule.walkDecls('overflow-y', declaration => { scrollTravelOverflow=declaration.value; });
 });
-assert.equal(travelOverflow,'hidden','period-tab travel and mobile row snapping must pause native momentum');
+assert.equal(scrollTravelOverflow,'hidden','Scroll cards retain their existing tab-travel behavior');
+for (const state of ['[data-travelling="true"]','[data-snapping]']) {
+ let listOverflow;
+ sheet.walkRules(`.tableScroll${state}`, rule => rule.walkDecls('overflow-y', declaration => { listOverflow=declaration.value; }));
+ assert.equal(listOverflow,undefined,'mobile List must stay scrollable through tab travel and detents');
+}
 function declarations(selector,width,height){
  const props={};sheet.walkRules(selector,rule=>{
   const condition=rule.parent.type==='atrule'?rule.parent.params:'';
